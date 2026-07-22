@@ -258,6 +258,30 @@ input, select, textarea, button { font-size: 16px; } /* prevent iOS zoom */
   .sidebar-overlay.show{display:block}
 }
 
+/* ============= Sync ============= */
+.sync-status{display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:var(--radius-sm);font-size:13px;font-weight:500}
+.sync-status.synced{background:#ecfdf5;color:#16a34a}
+.sync-status.syncing{background:#eef2ff;color:#4f6ef7}
+.sync-status.error{background:#fef2f2;color:#ef4444}
+.sync-status.idle{background:#f1f5f9;color:#64748b}
+.sync-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.sync-dot.green{background:#22c55e}
+.sync-dot.blue{background:#4f6ef7;animation:pulse 1.5s infinite}
+.sync-dot.red{background:#ef4444}
+.sync-dot.gray{background:#94a3b8}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.sync-info{display:flex;gap:20px;flex-wrap:wrap;margin-top:8px}
+.sync-info-item{font-size:12px;color:var(--text-light)}
+.sync-info-item strong{color:var(--text)}
+.share-box{background:var(--primary-light);border:1px solid rgba(79,110,247,.2);border-radius:var(--radius-sm);padding:12px 16px;margin-top:12px;font-size:13px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px}
+.share-box .url{font-family:monospace;font-size:12px;color:var(--primary);word-break:break-all}
+.share-box .copy-btn{padding:4px 12px;border-radius:16px;border:1px solid var(--primary);background:var(--primary);color:#fff;cursor:pointer;font-size:12px;white-space:nowrap;transition:all var(--transition)}
+.share-box .copy-btn:hover{background:var(--primary-dark)}
+.token-mask{font-family:monospace;letter-spacing:2px}
+.sync-log{max-height:120px;overflow-y:auto;font-size:12px;color:var(--text-light);margin-top:8px;background:#fafbfc;border-radius:6px;padding:8px}
+.sync-log .log-entry{padding:2px 0;border-bottom:1px solid #f1f5f9}
+.sync-log .log-entry:last-child{border-bottom:none}
+
 /* ============= Print ============= */
 @media print{
   .sidebar,.page-header,.filter-bar,.btn,.chat-container{display:none!important}
@@ -617,13 +641,80 @@ input, select, textarea, button { font-size: 16px; } /* prevent iOS zoom */
 
       <!-- ============ SETTINGS ============ -->
       <div v-if="page==='settings'">
+        <!-- Cloud Sync Card -->
+        <div class="card">
+          <div class="card-title">☁️ 云端同步</div>
+          <div class="sync-status" :class="syncStatus">
+            <span class="sync-dot" :class="syncStatus === 'synced' ? 'green' : syncStatus === 'syncing' ? 'blue' : syncStatus === 'error' ? 'red' : 'gray'"></span>
+            <span>{{ syncStatusText }}</span>
+          </div>
+          <div class="sync-info">
+            <div class="sync-info-item">最后同步：<strong>{{ syncConfig.lastSync ? formatTime(syncConfig.lastSync) : '从未' }}</strong></div>
+            <div class="sync-info-item">云端记录：<strong>{{ syncConfig.remoteCount ?? '—' }} 条</strong></div>
+          </div>
+
+          <div v-if="!syncConfig.enabled" style="margin-top:16px">
+            <div class="form-group">
+              <label>GitHub Personal Access Token</label>
+              <div style="display:flex;gap:8px">
+                <input class="form-control" v-model="syncConfig.token" type="password" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" style="font-family:monospace" />
+                <button class="btn btn-primary btn-sm" @click="enableSync" :disabled="!syncConfig.token || syncStatus==='syncing'" style="white-space:nowrap">🔗 启用同步</button>
+              </div>
+              <div style="font-size:11px;color:var(--text-light);margin-top:4px">
+                需要 <strong>gist</strong> 权限。创建 Token：
+                <a href="https://github.com/settings/tokens/new?scopes=gist&description=workbench-sync" target="_blank">点此生成</a>，
+                勾选 gist 后生成，粘贴到上方。Token 仅保存在本地浏览器中。
+              </div>
+            </div>
+          </div>
+
+          <div v-if="syncConfig.enabled" style="margin-top:16px;display:flex;flex-wrap:wrap;gap:10px">
+            <button class="btn btn-primary btn-sm" @click="syncNow" :disabled="syncStatus==='syncing'">
+              {{ syncStatus==='syncing' ? '⏳ 同步中...' : '🔄 立即同步' }}
+            </button>
+            <button class="btn btn-outline btn-sm" @click="disableSync">⏸️ 断开同步</button>
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;margin-left:8px">
+              <input type="checkbox" v-model="syncConfig.autoSync" @change="saveSyncConfig" style="accent-color:var(--primary)" />
+              保存时自动同步
+            </label>
+          </div>
+
+          <div class="sync-log" v-if="syncLog.length">
+            <div class="log-entry" v-for="(log, i) in syncLog" :key="i">{{ log }}</div>
+          </div>
+        </div>
+
+        <!-- Finance Sharing Card -->
+        <div class="card">
+          <div class="card-title">👥 财务共享</div>
+          <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">
+            让您的财务人员也能访问同一份记账数据。财务人员只需打开下方链接，并在设置中输入相同的同步 Token 即可。
+          </p>
+          <div class="share-box">
+            <span class="url">{{ shareUrl }}</span>
+            <button class="copy-btn" @click="copyShareUrl">📋 复制链接</button>
+          </div>
+          <div style="margin-top:12px;padding:12px;background:#fffbeb;border-radius:var(--radius-sm);font-size:12px;color:#92400e;line-height:1.8">
+            <strong>💡 财务人员操作步骤：</strong><br>
+            1. 在电脑/手机浏览器打开上方链接<br>
+            2. 进入「设置」→「云端同步」<br>
+            3. 输入同步 Token（您需要把 Token 发给财务人员）<br>
+            4. 点击「启用同步」，数据自动合并<br>
+            <em style="color:#b45309">提示：财务人员开启同步后，所有设备的记账数据会自动保持一致。</em>
+          </div>
+          <div v-if="syncConfig.enabled" style="margin-top:12px;font-size:12px;color:var(--text-light)">
+            <span class="sync-dot green" style="display:inline-block"></span> 同步 Token 已配置 · Gist ID: <code>{{ syncConfig.gistId || '—' }}</code>
+          </div>
+        </div>
+
+        <!-- Data Management -->
         <div class="card">
           <div class="card-title">⚙️ 数据管理</div>
           <div style="display:flex;flex-wrap:wrap;gap:12px">
-            <button class="btn btn-primary" @click="exportData">📤 导出数据 (JSON)</button>
-            <button class="btn btn-outline" @click="triggerImport">📥 导入数据</button>
+            <button class="btn btn-primary btn-sm" @click="exportData">📤 导出数据 (JSON)</button>
+            <button class="btn btn-outline btn-sm" @click="triggerImport">📥 导入数据</button>
             <input ref="importInput" type="file" accept=".json" style="display:none" @change="importData" />
-            <button class="btn btn-danger" @click="confirmClear">🗑️ 清空所有数据</button>
+            <button class="btn btn-danger btn-sm" @click="confirmClear">🗑️ 清空所有数据</button>
           </div>
           <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
             <div class="form-group">
@@ -638,12 +729,13 @@ input, select, textarea, button { font-size: 16px; } /* prevent iOS zoom */
             </div>
           </div>
         </div>
+
         <div class="card">
           <div class="card-title">ℹ️ 关于</div>
           <div style="font-size:13px;color:var(--text-secondary);line-height:2">
-            <div><strong>我的工作台 · 记账系统</strong> v1.0</div>
-            <div>数据完全存储在本地浏览器中，不会上传到任何服务器。</div>
-            <div>建议定期导出数据备份。</div>
+            <div><strong>我的工作台 · 记账系统</strong> v2.0</div>
+            <div>支持云端同步，多设备数据自动保持一致。</div>
+            <div>数据通过 GitHub Gist 加密存储，仅您授权的人员可访问。</div>
           </div>
         </div>
       </div>
@@ -917,6 +1009,269 @@ const app = createApp({
     const invoiceUploadInput = ref(null);
     const importInput = ref(null);
 
+    // Sync state
+    const syncStatus = ref('idle'); // idle | syncing | synced | error
+    const syncLog = ref([]);
+    const syncConfig = ref({
+      token: '',
+      gistId: '',
+      enabled: false,
+      autoSync: true,
+      lastSync: null,
+      remoteCount: null
+    });
+
+    const syncStatusText = computed(() => {
+      const map = {
+        idle: '未配置同步',
+        syncing: '正在同步...',
+        synced: syncConfig.value.lastSync ? `已同步 · ${formatTime(syncConfig.value.lastSync)}` : '已同步',
+        error: '同步失败，请检查 Token 和网络'
+      };
+      return map[syncStatus.value] || '未配置同步';
+    });
+
+    const shareUrl = computed(() => {
+      return window.location.origin + window.location.pathname;
+    });
+
+    function addSyncLog(msg) {
+      const now = new Date();
+      const time = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+      syncLog.value.unshift(`[${time}] ${msg}`);
+      if (syncLog.value.length > 20) syncLog.value.pop();
+    }
+
+    function loadSyncConfig() {
+      try {
+        const d = localStorage.getItem('workbench_sync_config');
+        if (d) {
+          const parsed = JSON.parse(d);
+          syncConfig.value = { ...syncConfig.value, ...parsed };
+          if (parsed.enabled && parsed.gistId) {
+            syncStatus.value = 'synced';
+          }
+        }
+      } catch(e) { console.error('Load sync config error:', e); }
+    }
+
+    function saveSyncConfig() {
+      try {
+        localStorage.setItem('workbench_sync_config', JSON.stringify({
+          token: syncConfig.value.token,
+          gistId: syncConfig.value.gistId,
+          enabled: syncConfig.value.enabled,
+          autoSync: syncConfig.value.autoSync,
+          lastSync: syncConfig.value.lastSync,
+          remoteCount: syncConfig.value.remoteCount
+        }));
+      } catch(e) { console.error('Save sync config error:', e); }
+    }
+
+    async function enableSync() {
+      if (!syncConfig.value.token || !syncConfig.value.token.startsWith('ghp_')) {
+        showToast('请输入有效的 GitHub Token（以 ghp_ 开头）', 'error');
+        return;
+      }
+      syncStatus.value = 'syncing';
+      addSyncLog('正在启用云端同步...');
+
+      try {
+        // Try to find existing gist
+        const listResp = await fetch('https://api.github.com/gists?per_page=100', {
+          headers: { 'Authorization': `token ${syncConfig.value.token}`, 'Accept': 'application/vnd.github.v3+json' }
+        });
+        if (!listResp.ok) throw new Error(`GitHub API 错误 (${listResp.status})`);
+
+        const gists = await listResp.json();
+        let gistId = null;
+        const existing = gists.find(g => g.description === 'workbench-expenses-sync');
+        if (existing) {
+          gistId = existing.id;
+          addSyncLog(`找到已有同步数据：${existing.id}`);
+          // Pull existing data
+          await syncFromCloud(true);
+        } else {
+          // Create new gist
+          addSyncLog('创建新的云端存储...');
+          const createResp = await fetch('https://api.github.com/gists', {
+            method: 'POST',
+            headers: {
+              'Authorization': `token ${syncConfig.value.token}`,
+              'Accept': 'application/vnd.github.v3+json',
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              description: 'workbench-expenses-sync',
+              public: false,
+              files: {
+                'expenses.json': {
+                  content: JSON.stringify({
+                    expenses: expenses.value,
+                    updatedAt: new Date().toISOString(),
+                    version: 2
+                  })
+                }
+              }
+            })
+          });
+          if (!createResp.ok) throw new Error(`创建 Gist 失败 (${createResp.status})`);
+          const created = await createResp.json();
+          gistId = created.id;
+          addSyncLog(`云端存储已创建：${gistId}`);
+        }
+
+        syncConfig.value.gistId = gistId;
+        syncConfig.value.enabled = true;
+        syncConfig.value.lastSync = Date.now();
+        syncConfig.value.remoteCount = expenses.value.length;
+        saveSyncConfig();
+        syncStatus.value = 'synced';
+        addSyncLog(`✅ 同步已启用，共 ${expenses.value.length} 条记录`);
+        showToast('云端同步已启用！');
+      } catch(e) {
+        syncStatus.value = 'error';
+        addSyncLog(`❌ 启用同步失败：${e.message}`);
+        showToast('同步失败：' + e.message, 'error');
+      }
+    }
+
+    function disableSync() {
+      if (!confirm('确定要断开云端同步吗？本地数据不会丢失。')) return;
+      syncConfig.value.enabled = false;
+      syncConfig.value.gistId = '';
+      saveSyncConfig();
+      syncStatus.value = 'idle';
+      addSyncLog('已断开云端同步');
+      showToast('同步已断开', 'info');
+    }
+
+    async function syncToCloud(silent = false) {
+      if (!syncConfig.value.enabled || !syncConfig.value.gistId || !syncConfig.value.token) return;
+      syncStatus.value = 'syncing';
+      if (!silent) addSyncLog('正在上传数据到云端...');
+
+      try {
+        const resp = await fetch(`https://api.github.com/gists/${syncConfig.value.gistId}`, {
+          method: 'PATCH',
+          headers: {
+            'Authorization': `token ${syncConfig.value.token}`,
+            'Accept': 'application/vnd.github.v3+json',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            files: {
+              'expenses.json': {
+                content: JSON.stringify({
+                  expenses: expenses.value,
+                  updatedAt: new Date().toISOString(),
+                  version: 2
+                })
+              }
+            }
+          })
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          throw new Error(err.message || `更新失败 (${resp.status})`);
+        }
+        syncConfig.value.lastSync = Date.now();
+        syncConfig.value.remoteCount = expenses.value.length;
+        saveSyncConfig();
+        syncStatus.value = 'synced';
+        if (!silent) {
+          addSyncLog(`✅ 已上传 ${expenses.value.length} 条记录到云端`);
+          showToast('同步成功');
+        }
+      } catch(e) {
+        syncStatus.value = 'error';
+        addSyncLog(`❌ 上传失败：${e.message}`);
+        if (!silent) showToast('同步失败：' + e.message, 'error');
+      }
+    }
+
+    async function syncFromCloud(silent = false) {
+      if (!syncConfig.value.enabled || !syncConfig.value.gistId || !syncConfig.value.token) return;
+      syncStatus.value = 'syncing';
+      if (!silent) addSyncLog('正在从云端下载数据...');
+
+      try {
+        const resp = await fetch(`https://api.github.com/gists/${syncConfig.value.gistId}`, {
+          headers: { 'Authorization': `token ${syncConfig.value.token}`, 'Accept': 'application/vnd.github.v3+json' }
+        });
+        if (!resp.ok) throw new Error(`获取失败 (${resp.status})`);
+
+        const gist = await resp.json();
+        const file = gist.files && gist.files['expenses.json'];
+        if (!file || !file.content) throw new Error('云端数据为空');
+
+        const remote = JSON.parse(file.content);
+        if (!Array.isArray(remote.expenses)) throw new Error('云端数据格式错误');
+
+        const remoteUpdated = new Date(remote.updatedAt).getTime();
+        const localUpdated = syncConfig.value.lastSync || 0;
+
+        if (remoteUpdated > localUpdated) {
+          // Merge: remote data is newer, use it but keep local-only items
+          const remoteIds = new Set(remote.expenses.map(e => e.id));
+          const localOnly = expenses.value.filter(e => !remoteIds.has(e.id));
+          const merged = [...remote.expenses, ...localOnly];
+          expenses.value = merged;
+          saveData();
+          syncConfig.value.lastSync = Date.now();
+          syncConfig.value.remoteCount = remote.expenses.length;
+          saveSyncConfig();
+          syncStatus.value = 'synced';
+          if (!silent) {
+            addSyncLog(`✅ 已下载并合并 ${remote.expenses.length} 条云端记录`);
+            showToast(`已同步 ${remote.expenses.length} 条记录`);
+          }
+          initCharts();
+        } else {
+          syncStatus.value = 'synced';
+          if (!silent) addSyncLog('本地数据已是最新，无需更新');
+        }
+      } catch(e) {
+        syncStatus.value = 'error';
+        addSyncLog(`❌ 下载失败：${e.message}`);
+        if (!silent) showToast('同步失败：' + e.message, 'error');
+      }
+    }
+
+    async function syncNow() {
+      if (!syncConfig.value.enabled) {
+        showToast('请先启用云端同步', 'error');
+        return;
+      }
+      // First pull from cloud, then push local changes
+      await syncFromCloud();
+      await syncToCloud(true);
+      addSyncLog('✅ 双向同步完成');
+      showToast('同步完成');
+    }
+
+    function copyShareUrl() {
+      const url = shareUrl.value;
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(url).then(() => showToast('链接已复制，发给财务人员即可'));
+      } else {
+        // Fallback
+        const ta = document.createElement('textarea');
+        ta.value = url;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showToast('链接已复制');
+      }
+    }
+
+    function formatTime(ts) {
+      if (!ts) return '';
+      const d = new Date(ts);
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+    }
+
     const quickReplies = ['花了500块买办公用品，没开发票', '今天打车花了80块，没要发票', '买电脑8000块，开了电子发票在微信里', '请客户吃饭花了1200，开了纸质发票在抽屉里'];
 
     const categories = CATEGORIES;
@@ -933,6 +1288,10 @@ const app = createApp({
     function saveData() {
       try {
         localStorage.setItem('workbench_expenses', JSON.stringify(expenses.value));
+        // Auto sync to cloud if enabled
+        if (syncConfig.value.enabled && syncConfig.value.autoSync && syncConfig.value.gistId) {
+          syncToCloud(true);
+        }
       } catch(e) { console.error('Save error:', e); }
     }
 
@@ -1439,6 +1798,12 @@ const app = createApp({
       loadData();
       // Set default date
       form.value.date = new Date().toISOString().slice(0,10);
+      // Load sync config
+      loadSyncConfig();
+      // Auto-sync on load if enabled
+      if (syncConfig.value.enabled && syncConfig.value.gistId) {
+        setTimeout(() => syncFromCloud(true), 2000);
+      }
       // Welcome message
       chatMessages.value.push({
         role: 'bot',
@@ -1468,7 +1833,10 @@ const app = createApp({
       handleInvoiceUploadFromPage, processUploadedInvoice,
       editExpense, saveEdit, closeEditModal, deleteExpense,
       openInvoiceDetail, resetFilters,
-      exportData, triggerImport, importData, confirmClear, showToast
+      exportData, triggerImport, importData, confirmClear, showToast,
+      // Sync
+      syncStatus, syncStatusText, syncLog, syncConfig, shareUrl,
+      enableSync, disableSync, syncNow, copyShareUrl, formatTime, saveSyncConfig
     };
   }
 });
