@@ -313,7 +313,7 @@ input, select, textarea, button { font-size: 16px; } /* prevent iOS zoom */
       </div>
       <div class="nav-item" :class="{active: page==='invoices'}" @click="navigate('invoices')">
         <span class="icon">📄</span>发票
-        <span class="badge" v-if="pendingInvoices">{{pendingInvoices}}</span>
+        <span class="badge" v-if="pendingInvoiceCount">{{pendingInvoiceCount}}</span>
       </div>
       <div class="nav-item" :class="{active: page==='settings'}" @click="navigate('settings')">
         <span class="icon">⚙️</span>设置
@@ -588,10 +588,28 @@ input, select, textarea, button { font-size: 16px; } /* prevent iOS zoom */
       <!-- ============ INVOICES ============ -->
       <div v-if="page==='invoices'">
         <div class="card">
-          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
             <span>📄 发票管理</span>
-            <button class="btn btn-primary btn-sm" @click="showInvoiceUpload=true">➕ 上传发票</button>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-primary btn-sm" @click="pullRemoteInvoices" :disabled="!syncConfig.enabled" title="从云端邮箱拉取发票">🔄 拉取云端发票</button>
+              <button class="btn btn-outline btn-sm" @click="showInvoiceUpload=true">➕ 手动上传</button>
+            </div>
           </div>
+
+          <!-- Tabs -->
+          <div style="display:flex;gap:4px;margin:16px 0;border-bottom:1px solid var(--border);padding-bottom:4px">
+            <button class="btn btn-sm" :class="invoiceTab==='pending'?'btn-primary':'btn-outline'" @click="invoiceTab='pending'">
+              ⏳ 待匹配 <span v-if="pendingInvoiceCount" class="badge">{{pendingInvoiceCount}}</span>
+            </button>
+            <button class="btn btn-sm" :class="invoiceTab==='matched'?'btn-primary':'btn-outline'" @click="invoiceTab='matched'">
+              ✅ 已匹配 <span v-if="matchedInvoiceCount" class="badge">{{matchedInvoiceCount}}</span>
+            </button>
+            <button class="btn btn-sm" :class="invoiceTab==='all'?'btn-primary':'btn-outline'" @click="invoiceTab='all'">
+              📑 全部 {{invoicePool.length}}
+            </button>
+          </div>
+
+          <!-- Manual upload -->
           <div v-if="showInvoiceUpload" style="margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid var(--border)">
             <div class="upload-zone" @click="triggerInvoiceUpload">
               <div class="icon">📎</div>
@@ -612,29 +630,90 @@ input, select, textarea, button { font-size: 16px; } /* prevent iOS zoom */
               <button class="btn btn-outline btn-sm" @click="showInvoiceUpload=false;uploadedInvoice=null">取消</button>
             </div>
           </div>
-          <div class="invoice-grid" v-if="invoicedExpenses.length">
-            <div class="invoice-card" v-for="item in invoicedExpenses" :key="item.id" @click="openInvoiceDetail(item)">
-              <div class="top">
-                <span class="tag" :class="item.invoiceType==='电子发票'?'tag-purple':'tag-orange'">{{item.invoiceType || '发票'}}</span>
-                <span class="amount">¥{{formatNumber(item.amount)}}</span>
-              </div>
-              <div style="font-size:13px;color:var(--text);margin-bottom:4px">{{item.description || item.category}}</div>
-              <div class="meta">{{item.date}} · {{item.category}}</div>
-              <div class="tags" v-if="item.invoiceLocation">
-                <span class="tag tag-gray">📍 {{item.invoiceLocation}}</span>
-              </div>
-              <div class="tags" v-if="item.invoiceNumber">
-                <span class="tag tag-gray">№ {{item.invoiceNumber}}</span>
-              </div>
-              <div class="tags" v-if="item.invoiceFile">
-                <span class="tag tag-green">📎 电子票已上传</span>
+
+          <!-- Pending Tab -->
+          <div v-if="invoiceTab==='pending'">
+            <div v-if="pendingInvoices.length" class="invoice-grid">
+              <div class="invoice-card" v-for="item in pendingInvoices" :key="item.id">
+                <div class="top">
+                  <span class="tag" :class="item.type==='电子发票'?'tag-purple':'tag-orange'">{{item.type || '发票'}}</span>
+                  <span class="amount">¥{{formatNumber(item.amount)}}</span>
+                </div>
+                <div style="font-size:13px;color:var(--text);margin-bottom:4px">{{item.seller || '未知销售方'}}</div>
+                <div class="meta">{{item.date}} · 发票号 {{item.invoiceNumber || '—'}}</div>
+                <div class="tags">
+                  <span class="tag tag-yellow">⏳ 待匹配</span>
+                </div>
+                <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
+                  <button class="btn btn-primary btn-sm" @click="openLinkModal(item.id)">🔗 关联费用</button>
+                  <button class="btn btn-outline btn-sm" @click="openInvoiceDetail(item)">查看</button>
+                </div>
               </div>
             </div>
+            <div v-else-if="!syncConfig.enabled" class="empty-state">
+              <div class="icon">☁️</div>
+              <div class="text">云端发票同步未启用</div>
+              <div class="sub">在「设置」中开启云端同步，即可自动从邮箱拉取电子发票</div>
+            </div>
+            <div v-else class="empty-state">
+              <div class="icon">📄</div>
+              <div class="text">暂无待匹配发票</div>
+              <div class="sub">点击上方「拉取云端发票」检查邮箱，或记账后自动匹配</div>
+            </div>
           </div>
-          <div class="empty-state" v-else>
-            <div class="icon">📄</div>
-            <div class="text">暂未有任何发票记录</div>
-            <div class="sub">记账时勾选「已开票」即可生成发票记录</div>
+
+          <!-- Matched Tab -->
+          <div v-if="invoiceTab==='matched'">
+            <div v-if="matchedInvoices.length" class="invoice-grid">
+              <div class="invoice-card" v-for="item in matchedInvoices" :key="item.id">
+                <div class="top">
+                  <span class="tag" :class="item.type==='电子发票'?'tag-purple':'tag-orange'">{{item.type || '发票'}}</span>
+                  <span class="amount">¥{{formatNumber(item.amount)}}</span>
+                </div>
+                <div style="font-size:13px;color:var(--text);margin-bottom:4px">{{item.seller || '未知销售方'}}</div>
+                <div class="meta">{{item.date}} · 发票号 {{item.invoiceNumber || '—'}}</div>
+                <div class="tags">
+                  <span class="tag tag-green">✅ {{item.matchType || '已关联'}}</span>
+                </div>
+                <div v-if="getLinkedExpense(item)" style="margin-top:8px;padding:8px;background:var(--primary-light);border-radius:6px;font-size:12px">
+                  <div><strong>关联费用：</strong>{{getLinkedExpense(item).description || getLinkedExpense(item).category}}</div>
+                  <div>¥{{formatNumber(getLinkedExpense(item).amount)}} · {{getLinkedExpense(item).date}}</div>
+                </div>
+                <div style="margin-top:8px">
+                  <button class="btn btn-outline btn-sm" @click="unlinkInvoice(item.id)">取消关联</button>
+                </div>
+              </div>
+            </div>
+            <div v-else class="empty-state">
+              <div class="icon">🔗</div>
+              <div class="text">暂无已匹配发票</div>
+              <div class="sub">发票与费用自动/手动关联后会显示在这里</div>
+            </div>
+          </div>
+
+          <!-- All Tab -->
+          <div v-if="invoiceTab==='all'">
+            <div class="invoice-grid" v-if="invoicePool.length">
+              <div class="invoice-card" v-for="item in invoicePool" :key="item.id" @click="openInvoiceDetail(item)">
+                <div class="top">
+                  <span class="tag" :class="item.type==='电子发票'?'tag-purple':'tag-orange'">{{item.type || '发票'}}</span>
+                  <span class="amount">¥{{formatNumber(item.amount || 0)}}</span>
+                </div>
+                <div style="font-size:13px;color:var(--text);margin-bottom:4px">{{item.seller || item.subject || '未知销售方'}}</div>
+                <div class="meta">{{item.date || item.emailDate || '—'}} · 发票号 {{item.invoiceNumber || '—'}}</div>
+                <div class="tags">
+                  <span class="tag" :class="item.matchedExpenseId?'tag-green':'tag-yellow'">
+                    {{item.matchedExpenseId ? '✅ 已匹配' : '⏳ 待匹配'}}
+                  </span>
+                  <span v-if="item.source==='email'" class="tag tag-gray">📧 邮件</span>
+                </div>
+              </div>
+            </div>
+            <div v-else class="empty-state">
+              <div class="icon">📄</div>
+              <div class="text">发票池为空</div>
+              <div class="sub">点击「拉取云端发票」从邮箱同步，或手动上传</div>
+            </div>
           </div>
         </div>
       </div>
@@ -825,17 +904,64 @@ input, select, textarea, button { font-size: 16px; } /* prevent iOS zoom */
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px;line-height:2">
           <div><span style="color:var(--text-secondary)">发票类型：</span>{{invoiceDetail.data.invoiceType || '未指定'}}</div>
           <div><span style="color:var(--text-secondary)">发票号码：</span>{{invoiceDetail.data.invoiceNumber || '—'}}</div>
+          <div><span style="color:var(--text-secondary)">发票代码：</span>{{invoiceDetail.data.invoiceCode || '—'}}</div>
+          <div><span style="color:var(--text-secondary)">校验码：</span>{{invoiceDetail.data.checkCode || '—'}}</div>
+          <div><span style="color:var(--text-secondary)">销售方：</span>{{invoiceDetail.data.seller || '—'}}</div>
+          <div><span style="color:var(--text-secondary)">购买方：</span>{{invoiceDetail.data.buyer || '—'}}</div>
           <div><span style="color:var(--text-secondary)">存放位置：</span>{{invoiceDetail.data.invoiceLocation || '—'}}</div>
-          <div><span style="color:var(--text-secondary)">描述：</span>{{invoiceDetail.data.description || '—'}}</div>
+          <div><span style="color:var(--text-secondary)">税额：</span>{{invoiceDetail.data.taxAmount ? '¥'+formatNumber(invoiceDetail.data.taxAmount) : '—'}}</div>
+          <div style="grid-column:1/-1"><span style="color:var(--text-secondary)">描述/主题：</span>{{invoiceDetail.data.description || '—'}}</div>
+          <div v-if="invoiceDetail.data.scanTime" style="grid-column:1/-1"><span style="color:var(--text-secondary)">扫描时间：</span>{{invoiceDetail.data.scanTime}}</div>
         </div>
         <div v-if="invoiceDetail.data.invoiceFile" style="margin-top:16px;padding:16px;background:#fafbfc;border-radius:var(--radius-sm);text-align:center">
           <div style="font-size:40px;margin-bottom:8px">📄</div>
           <div style="font-size:13px;font-weight:500">{{invoiceDetail.data.invoiceFile.name}}</div>
           <div style="font-size:12px;color:var(--text-light);margin-top:2px">电子发票文件已上传</div>
         </div>
+        <div v-if="invoiceDetail.data.attachments && invoiceDetail.data.attachments.length" style="margin-top:16px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:8px">📎 邮件附件 ({{invoiceDetail.data.attachments.length}}个)</div>
+          <div v-for="(att, idx) in invoiceDetail.data.attachments" :key="idx" style="padding:10px 12px;background:#fafbfc;border-radius:var(--radius-sm);font-size:13px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
+            <span>{{att.filename}} <span style="color:var(--text-light);font-size:12px">({{(att.size/1024).toFixed(1)}} KB)</span></span>
+            <span style="font-size:12px;color:var(--text-secondary)">{{att.contentType}}</span>
+          </div>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-outline" @click="invoiceDetail.show=false">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Link Invoice Modal ============ -->
+  <div class="modal-overlay" v-if="linkModal.show" @click.self="closeLinkModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>🔗 关联费用记录</h3>
+        <button class="close-btn" @click="closeLinkModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div v-if="linkModal.expenses.length">
+          <div style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">
+            选择与该发票对应的费用记录（已按金额相近排序）：
+          </div>
+          <div v-for="exp in linkModal.expenses" :key="exp.id" style="padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;cursor:pointer" @click="linkInvoiceToExpense(linkModal.invoiceId, exp.id)">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div>
+                <div style="font-weight:600">{{exp.description || exp.category}}</div>
+                <div style="font-size:12px;color:var(--text-secondary)">{{exp.date}} · {{exp.category}}</div>
+              </div>
+              <div style="font-weight:600;color:var(--primary)">¥{{formatNumber(exp.amount)}}</div>
+            </div>
+          </div>
+        </div>
+        <div v-else class="empty-state">
+          <div class="icon">📝</div>
+          <div class="text">暂无未关联的费用记录</div>
+          <div class="sub">请先记账，再回来关联发票</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" @click="closeLinkModal">取消</button>
       </div>
     </div>
   </div>
@@ -864,7 +990,7 @@ input, select, textarea, button { font-size: 16px; } /* prevent iOS zoom */
       <div class="bottom-nav-item" :class="{active: page==='invoices'}" @click="navigate('invoices')">
         <span class="icon">📄</span>
         <span>发票</span>
-        <span class="badge" v-if="pendingInvoices">{{pendingInvoices}}</span>
+        <span class="badge" v-if="pendingInvoiceCount">{{pendingInvoiceCount}}</span>
       </div>
       <div class="bottom-nav-item" :class="{active: page==='settings'}" @click="navigate('settings')">
         <span class="icon">⚙️</span>
@@ -987,6 +1113,7 @@ const app = createApp({
     const page = ref('dashboard');
     const sidebarOpen = ref(false);
     const expenses = ref([]);
+    const invoicePool = ref([]); // Cloud-scraped invoices from email
     const chatMessages = ref([]);
     const chatInput = ref('');
     const isTyping = ref(false);
@@ -995,9 +1122,11 @@ const app = createApp({
     const toasts = ref([]);
     const editModal = ref({ show: false, data: {} });
     const invoiceDetail = ref({ show: false, data: null });
+    const linkModal = ref({ show: false, invoiceId: null, expenses: [] });
     const showInvoiceUpload = ref(false);
     const uploadedInvoice = ref(null);
     const expenseFilter = ref({ search: '', category: '', invoice: '', dateFrom: '', dateTo: '' });
+    const invoiceTab = ref('pending'); // pending | matched | all
 
     const form = ref({
       amount: null, date: '', category: '办公用品', description: '', paymentMethod: '微信支付',
@@ -1272,6 +1401,198 @@ const app = createApp({
       return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
     }
 
+    // ============ Invoice Matching ============
+    function matchInvoices() {
+      if (!invoicePool.value.length) return;
+      let matchedCount = 0;
+      for (const inv of invoicePool.value) {
+        if (inv.matchedExpenseId) continue;
+        const match = findBestMatch(inv);
+        if (match) {
+          inv.matchedExpenseId = match.id;
+          inv.matchConfidence = match.confidence;
+          inv.matchType = match.type;
+          const exp = expenses.value.find(e => e.id === match.id);
+          if (exp) {
+            exp.invoiceLinked = true;
+            exp.invoiceId = inv.id;
+            exp.invoiceSource = 'auto';
+            if (inv.invoiceNumber && !exp.invoiceNumber) exp.invoiceNumber = inv.invoiceNumber;
+            if (inv.seller && !exp.invoiceLocation) exp.invoiceLocation = inv.seller;
+          }
+          matchedCount++;
+        }
+      }
+      if (matchedCount > 0) {
+        saveData();
+        showToast(`自动匹配了 ${matchedCount} 张发票`);
+      }
+    }
+
+    function findBestMatch(inv) {
+      const invAmount = parseFloat(inv.amount);
+      if (!invAmount || isNaN(invAmount)) return null;
+      const invDate = inv.date ? new Date(inv.date) : null;
+      let best = null;
+      let bestScore = 0;
+      for (const exp of expenses.value) {
+        if (exp.invoiceLinked) continue;
+        let score = 0;
+        let type = '';
+        // Amount match (most important)
+        const expAmount = parseFloat(exp.amount);
+        if (Math.abs(invAmount - expAmount) < 0.01) {
+          score += 60;
+          type = '金额完全匹配';
+        } else if (Math.abs(invAmount - expAmount * 1.13) < 0.5 || Math.abs(invAmount * 1.13 - expAmount) < 0.5) {
+          score += 40;
+          type = '含税金额匹配';
+        } else if (Math.abs(invAmount - expAmount) / Math.max(invAmount, expAmount) < 0.05) {
+          score += 30;
+          type = '金额近似匹配';
+        }
+        // Date match
+        if (invDate && exp.date) {
+          const expDate = new Date(exp.date);
+          const diffDays = Math.abs((invDate - expDate) / (1000 * 60 * 60 * 24));
+          if (diffDays === 0) {
+            score += 30;
+            type += type ? ' + 日期相同' : '日期相同';
+          } else if (diffDays <= 3) {
+            score += 20;
+            type += type ? ' + 日期接近' : '日期接近';
+          } else if (diffDays <= 7) {
+            score += 10;
+          }
+        }
+        if (score > bestScore) {
+          bestScore = score;
+          best = { id: exp.id, confidence: score, type };
+        }
+      }
+      if (bestScore >= 80) {
+        return best;
+      }
+      return null;
+    }
+
+    async function pullRemoteInvoices() {
+      if (!syncConfig.value.enabled || !syncConfig.value.gistId) return;
+      try {
+        showToast('正在拉取云端发票...', 'info');
+        const resp = await fetch(`https://api.github.com/gists/${syncConfig.value.gistId}`, {
+          headers: { 'Authorization': `token ${syncConfig.value.token}`, 'Accept': 'application/vnd.github.v3+json' }
+        });
+        if (!resp.ok) throw new Error('获取失败');
+        const gist = await resp.json();
+        const file = gist.files && gist.files['invoice_pool.json'];
+        if (file && file.content) {
+          const remoteInvoices = JSON.parse(file.content);
+          // 云函数写入的是纯数组
+          const remoteList = Array.isArray(remoteInvoices) ? remoteInvoices : (remoteInvoices.invoices || []);
+          const existingIds = new Set(invoicePool.value.map(i => i.id));
+          const newInvoices = [];
+          for (const raw of remoteList) {
+            if (existingIds.has(raw.id)) continue;
+            // 适配云函数数据格式：将 parsed 字段平铺到顶层
+            const inv = {
+              id: raw.id,
+              messageId: raw.messageId,
+              subject: raw.subject,
+              from: raw.from,
+              emailDate: raw.emailDate,
+              scanTime: raw.scanTime,
+              attachments: raw.attachments || [],
+              status: raw.status || 'pending',
+              matchedExpenseId: raw.matchedExpenseId || null,
+              matchConfidence: raw.matchConfidence || 0,
+              matchType: raw.matchType || '',
+              source: raw.source || 'email',
+              // 从 parsed 中提取关键字段到顶层，便于匹配和显示
+              amount: raw.parsed?.amount || null,
+              date: raw.parsed?.date || null,
+              invoiceNumber: raw.parsed?.invoiceNumber || null,
+              invoiceCode: raw.parsed?.invoiceCode || null,
+              seller: raw.parsed?.seller || null,
+              buyer: raw.parsed?.buyer || null,
+              checkCode: raw.parsed?.checkCode || null,
+              taxAmount: raw.parsed?.taxAmount || null,
+              type: raw.parsed?.type || '电子发票',
+              _parsed: raw.parsed || {}
+            };
+            newInvoices.push(inv);
+          }
+          if (newInvoices.length > 0) {
+            invoicePool.value.push(...newInvoices);
+            saveData();
+            showToast(`收到 ${newInvoices.length} 张新发票`);
+            matchInvoices();
+          } else {
+            showToast('暂无新发票');
+          }
+        }
+      } catch(e) {
+        showToast('拉取发票失败: ' + e.message, 'error');
+      }
+    }
+
+    function getLinkedExpense(inv) {
+      if (!inv || !inv.matchedExpenseId) return null;
+      return expenses.value.find(e => e.id === inv.matchedExpenseId);
+    }
+
+    function openLinkModal(invoiceId) {
+      const inv = invoicePool.value.find(i => i.id === invoiceId);
+      if (!inv) return;
+      // 筛选未关联发票且金额相近的费用
+      const invAmount = parseFloat(inv.amount) || 0;
+      let candidates = expenses.value.filter(e => !e.invoiceLinked);
+      // 按金额相近排序
+      candidates = candidates.sort((a, b) => {
+        const da = Math.abs(parseFloat(a.amount) - invAmount);
+        const db = Math.abs(parseFloat(b.amount) - invAmount);
+        return da - db;
+      });
+      linkModal.value = { show: true, invoiceId, expenses: candidates.slice(0, 10) };
+    }
+
+    function closeLinkModal() {
+      linkModal.value.show = false;
+    }
+
+    function linkInvoiceToExpense(invoiceId, expenseId) {
+      const inv = invoicePool.value.find(i => i.id === invoiceId);
+      const exp = expenses.value.find(e => e.id === expenseId);
+      if (!inv || !exp) return;
+      inv.matchedExpenseId = expenseId;
+      inv.matchConfidence = 100;
+      inv.matchType = '手动关联';
+      exp.invoiceLinked = true;
+      exp.invoiceId = invoiceId;
+      exp.invoiceSource = 'manual';
+      if (inv.invoiceNumber && !exp.invoiceNumber) exp.invoiceNumber = inv.invoiceNumber;
+      if (inv.seller && !exp.invoiceLocation) exp.invoiceLocation = inv.seller;
+      saveData();
+      linkModal.value.show = false;
+      showToast('发票已关联');
+    }
+
+    function unlinkInvoice(invoiceId) {
+      const inv = invoicePool.value.find(i => i.id === invoiceId);
+      if (!inv || !inv.matchedExpenseId) return;
+      const exp = expenses.value.find(e => e.id === inv.matchedExpenseId);
+      if (exp) {
+        exp.invoiceLinked = false;
+        exp.invoiceId = null;
+        exp.invoiceSource = null;
+      }
+      inv.matchedExpenseId = null;
+      inv.matchConfidence = null;
+      inv.matchType = null;
+      saveData();
+      showToast('已取消关联');
+    }
+
     const quickReplies = ['花了500块买办公用品，没开发票', '今天打车花了80块，没要发票', '买电脑8000块，开了电子发票在微信里', '请客户吃饭花了1200，开了纸质发票在抽屉里'];
 
     const categories = CATEGORIES;
@@ -1282,12 +1603,15 @@ const app = createApp({
       try {
         const d = localStorage.getItem('workbench_expenses');
         if (d) expenses.value = JSON.parse(d);
+        const pool = localStorage.getItem('workbench_invoice_pool');
+        if (pool) invoicePool.value = JSON.parse(pool);
       } catch(e) { console.error('Load error:', e); }
     }
 
     function saveData() {
       try {
         localStorage.setItem('workbench_expenses', JSON.stringify(expenses.value));
+        localStorage.setItem('workbench_invoice_pool', JSON.stringify(invoicePool.value));
         // Auto sync to cloud if enabled
         if (syncConfig.value.enabled && syncConfig.value.autoSync && syncConfig.value.gistId) {
           syncToCloud(true);
@@ -1376,7 +1700,13 @@ const app = createApp({
 
     // Invoices
     const invoicedExpenses = computed(() => expenses.value.filter(e => e.hasInvoice).sort((a,b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt));
-    const pendingInvoices = computed(() => expenses.value.filter(e => e.hasInvoice && !e.invoiceFile && !e.invoiceNumber).length);
+    const pendingExpenseInvoices = computed(() => expenses.value.filter(e => e.hasInvoice && !e.invoiceFile && !e.invoiceNumber).length);
+
+    // Invoice pool (from cloud email scanner)
+    const pendingInvoices = computed(() => invoicePool.value.filter(i => !i.matchedExpenseId));
+    const matchedInvoices = computed(() => invoicePool.value.filter(i => i.matchedExpenseId));
+    const pendingInvoiceCount = computed(() => pendingInvoices.value.length);
+    const matchedInvoiceCount = computed(() => matchedInvoices.value.length);
 
     // All stats
     const totalAllAmount = computed(() => expenses.value.reduce((s,e) => s + e.amount, 0));
@@ -1642,7 +1972,26 @@ const app = createApp({
     }
 
     function openInvoiceDetail(item) {
-      invoiceDetail.value = { show: true, data: item };
+      // 统一数据结构：支持 expenses 和 invoicePool 两种格式
+      const data = {
+        amount: item.amount || 0,
+        date: item.date || item.emailDate || '',
+        category: item.category || item.type || '发票',
+        invoiceType: item.invoiceType || item.type || '电子发票',
+        invoiceNumber: item.invoiceNumber || '—',
+        invoiceLocation: item.invoiceLocation || item.seller || '—',
+        description: item.description || item.subject || '',
+        invoiceFile: item.invoiceFile || null,
+        seller: item.seller || null,
+        buyer: item.buyer || null,
+        checkCode: item.checkCode || null,
+        taxAmount: item.taxAmount || null,
+        invoiceCode: item.invoiceCode || null,
+        source: item.source || null,
+        scanTime: item.scanTime || null,
+        attachments: item.attachments || []
+      };
+      invoiceDetail.value = { show: true, data };
     }
 
     // Filters
@@ -1826,7 +2175,8 @@ const app = createApp({
       monthlyChange, invoicedAmount, invoicedRatio, avgDaily,
       topCategory, topCategoryAmount, recentExpenses,
       filteredExpenses, filteredTotal,
-      invoicedExpenses, pendingInvoices,
+      invoicedExpenses, pendingExpenseInvoices,
+      pendingInvoices, matchedInvoices, pendingInvoiceCount, matchedInvoiceCount,
       totalAllAmount, invoicedAmountAll, invoicedRatioAll, earliestDate, latestDate,
       navigate, formatNumber, sendChat, sendQuick, saveParsed, editParsed,
       saveManualExpense, resetForm, triggerInvoiceUpload, handleInvoiceUpload,
@@ -1834,6 +2184,9 @@ const app = createApp({
       editExpense, saveEdit, closeEditModal, deleteExpense,
       openInvoiceDetail, resetFilters,
       exportData, triggerImport, importData, confirmClear, showToast,
+      // Invoice pool
+      invoicePool, invoiceTab, linkModal,
+      pullRemoteInvoices, linkInvoiceToExpense, unlinkInvoice, getLinkedExpense, openLinkModal, closeLinkModal,
       // Sync
       syncStatus, syncStatusText, syncLog, syncConfig, shareUrl,
       enableSync, disableSync, syncNow, copyShareUrl, formatTime, saveSyncConfig
