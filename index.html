@@ -2019,8 +2019,8 @@ const app = createApp({
         } catch(e) {
           console.error('PDF 解析失败:', e);
           parsed = parseInvoiceText(file.name);
-          }
-        } else {
+        }
+      } else {
           // PDF.js 未加载，从文件名解析
           parsed = parseInvoiceText(file.name);
         }
