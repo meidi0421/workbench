@@ -514,13 +514,13 @@ input, select, textarea, button { font-size: 16px; } /* prevent iOS zoom */
             <input class="form-control" v-model="form.invoiceLocation" placeholder="如：微信卡包、抽屉、邮箱..." />
           </div>
           <div v-if="form.hasInvoice && form.invoiceType === '电子发票'" class="form-group">
-            <label>上传电子发票 (PDF/图片)</label>
-            <div class="upload-zone" @click="triggerInvoiceUpload">
+            <div style="font-weight:500;margin-bottom:8px">上传电子发票 (PDF/图片)</div>
+            <label class="upload-zone" style="cursor:pointer;margin:0">
+              <input ref="invoiceFileInput" type="file" accept=".pdf,image/*" style="display:none" @change="handleInvoiceUpload" />
               <div class="icon">📎</div>
               <div class="text">点击上传电子发票文件</div>
               <div class="hint">支持 PDF、PNG、JPG 格式，系统将自动提取信息</div>
-            </div>
-            <input ref="invoiceFileInput" type="file" accept=".pdf,image/*" style="display:none" @change="handleInvoiceUpload" />
+            </label>
             <div v-if="form.invoiceFile" class="invoice-preview">
               <span class="file-icon">📄</span>
               <div class="info">
@@ -619,12 +619,12 @@ input, select, textarea, button { font-size: 16px; } /* prevent iOS zoom */
 
           <!-- Manual upload -->
           <div v-if="showInvoiceUpload" style="margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid var(--border)">
-            <div class="upload-zone" @click="triggerInvoiceUpload">
+            <label class="upload-zone" style="cursor:pointer;margin:0">
+              <input ref="invoiceUploadInput" type="file" accept=".pdf,image/*" style="display:none" @change="handleInvoiceUploadFromPage" />
               <div class="icon">📎</div>
               <div class="text">点击上传电子发票 <strong>(PDF/图片)</strong></div>
               <div class="hint">支持 PDF、PNG、JPG 格式，系统将自动识别并关联支出</div>
-            </div>
-            <input ref="invoiceUploadInput" type="file" accept=".pdf,image/*" style="display:none" @change="handleInvoiceUploadFromPage" />
+            </label>
             <div v-if="uploadedInvoice" class="invoice-preview">
               <span class="file-icon">📄</span>
               <div class="info">
