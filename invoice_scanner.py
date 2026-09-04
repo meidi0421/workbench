@@ -22,7 +22,7 @@ IMAP_SERVER = os.environ.get('IMAP_SERVER', 'imap.exmail.qq.com')  # 企业微�
 IMAP_PORT = int(os.environ.get('IMAP_PORT', '993'))
 IMAP_USER = os.environ.get('IMAP_USER')          # 邮箱账号
 IMAP_PASS = os.environ.get('IMAP_PASS')          # 邮箱密码/客户端专用密码
-GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')    # GitHub Personal Access Token
+GITHUB_TOKEN = os.environ.get('GIST_TOKEN') or os.environ.get('GITHUB_TOKEN')    # GitHub Personal Access Token
 GIST_ID = os.environ.get('GIST_ID')              # Gist ID
 SCAN_DAYS = int(os.environ.get('SCAN_DAYS', '7'))  # 扫描最近N天
 
