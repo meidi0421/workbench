@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>发票自动扫描云函数 - 部署指南</title>
+  <style>
+    :root { --primary: #2563eb; --primary-light: #eff6ff; --success: #16a34a; --warning: #ea580c; --danger: #dc2626; --text: #1f2937; --text-secondary: #6b7280; --border: #e5e7eb; --radius: 10px; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8fafc; color: var(--text); line-height: 1.7; padding: 20px; }
+    .container { max-width: 720px; margin: 0 auto; }
+    h1 { font-size: 24px; margin-bottom: 8px; }
+    .subtitle { color: var(--text-secondary); font-size: 14px; margin-bottom: 24px; }
+    .card { background: #fff; border-radius: var(--radius); padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    h2 { font-size: 17px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    h3 { font-size: 15px; margin: 16px 0 8px; color: var(--text-secondary); }
+    .step { display: flex; gap: 12px; margin-bottom: 16px; }
+    .step-num { width: 28px; height: 28px; border-radius: 50%; background: var(--primary); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; flex-shrink: 0; }
+    .step-body { flex: 1; }
+    .step-title { font-weight: 600; margin-bottom: 4px; }
+    .step-desc { color: var(--text-secondary); font-size: 14px; }
+    code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 13px; font-family: 'SF Mono', Monaco, monospace; }
+    pre { background: #1e293b; color: #e2e8f0; padding: 16px; border-radius: var(--radius); overflow-x: auto; font-size: 13px; line-height: 1.6; margin: 8px 0; }
+    pre code { background: none; padding: 0; color: inherit; }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; }
+    .tag-green { background: #dcfce7; color: var(--success); }
+    .tag-orange { background: #ffedd5; color: var(--warning); }
+    .tag-blue { background: #dbeafe; color: var(--primary); }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 8px 0; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+    th { background: #f8fafc; font-weight: 600; font-size: 13px; color: var(--text-secondary); }
+    .alert { padding: 12px 16px; border-radius: var(--radius); font-size: 14px; margin: 12px 0; }
+    .alert-warning { background: #fff7ed; border-left: 4px solid var(--warning); }
+    .alert-info { background: var(--primary-light); border-left: 4px solid var(--primary); }
+    .alert-success { background: #f0fdf4; border-left: 4px solid var(--success); }
+    .file-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .file-chip { background: #f1f5f9; padding: 6px 12px; border-radius: 6px; font-size: 13px; font-family: monospace; }
+    a { color: var(--primary); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>发票自动扫描云函数 - 部署指南</h1>
+  <div class="subtitle">让工作台自动从企业微信邮箱拉取电子发票</div>
+
+  <div class="card">
+    <h2><span class="tag tag-green">已完成</span> 前端更新</h2>
+    <p style="font-size:14px;color:var(--text-secondary)">
+      前端代码已推送至 GitHub，约 1-2 分钟后在 <a href="https://meidi0421.github.io/workbench/" target="_blank">https://meidi0421.github.io/workbench/</a> 生效。
+    </p>
+    <div class="file-list">
+      <span class="file-chip">invoice_scanner.py</span>
+      <span class="file-chip">requirements.txt</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>📋 部署前准备</h2>
+    <table>
+      <tr><th>项目</th><th>说明</th><th>状态</th></tr>
+      <tr><td>腾讯云账号</td><td>需要注册并实名认证</td><td><span class="tag tag-orange">需准备</span></td></tr>
+      <tr><td>企业微信邮箱</td><td>开通 IMAP 服务，获取客户端专用密码</td><td><span class="tag tag-orange">需准备</span></td></tr>
+      <tr><td>GitHub Token</td><td>已有（ghp_...），用于写入 Gist</td><td><span class="tag tag-green">已有</span></td></tr>
+      <tr><td>Gist ID</td><td>已有，用于存储发票池数据</td><td><span class="tag tag-green">已有</span></td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>🔧 步骤一：开启企业微信邮箱 IMAP</h2>
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <div class="step-title">登录企业微信邮箱后台</div>
+        <div class="step-desc">访问 <a href="https://exmail.qq.com/login" target="_blank">https://exmail.qq.com/login</a>，用管理员或成员账号登录。</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <div class="step-title">开启 IMAP/SMTP 服务</div>
+        <div class="step-desc">
+          进入「设置」→「客户端设置」，勾选 <strong>IMAP/SMTP服务</strong>。<br>
+          记录服务器地址：<code>imap.exmail.qq.com</code>，端口：<code>993</code>（SSL）
+        </div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <div class="step-title">生成客户端专用密码</div>
+        <div class="step-desc">
+          在「客户端设置」中找到「生成专用密码」或「安全登录」。<br>
+          生成的密码仅显示一次，请务必保存。这个密码将用于云函数登录邮箱。
+        </div>
+      </div>
+    </div>
+    <div class="alert alert-warning">
+      <strong>注意：</strong>不要使用网页登录密码，必须使用客户端专用密码才能通过 IMAP 登录。
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>☁️ 步骤二：创建腾讯云云函数（SCF）</h2>
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <div class="step-title">进入腾讯云云函数控制台</div>
+        <div class="step-desc">访问 <a href="https://console.cloud.tencent.com/scf" target="_blank">https://console.cloud.tencent.com/scf</a>，选择「函数服务」→「新建」。</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <div class="step-title">选择「从头开始」创建</div>
+        <div class="step-desc">
+          函数名称：填写 <code>invoice-scanner</code><br>
+          运行环境：选择 <strong>Python 3.9</strong> 或 <strong>Python 3.10</strong><br>
+          地域：选择离你最近的（如广州/上海）
+        </div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <div class="step-title">上传代码</div>
+        <div class="step-desc">
+          将 <code>invoice_scanner.py</code> 和 <code>requirements.txt</code> 打包成 zip 上传。<br>
+          打包命令（Mac 终端执行）：
+        </div>
+        <pre>zip invoice_scanner.zip invoice_scanner.py requirements.txt</pre>
+        <div class="step-desc">然后在腾讯云控制台选择「本地上传 zip 包」，上传生成的 zip 文件。</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <div class="step-title">配置入口函数</div>
+        <div class="step-desc">执行方法填写：<code>index.main_handler</code>（或根据实际入口调整，本脚本入口为 <code>main_handler</code>）</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>🔐 步骤三：配置环境变量</h2>
+    <p style="font-size:14px;color:var(--text-secondary);margin-bottom:12px">
+      在函数配置页找到「环境变量」或「高级配置」，添加以下变量：
+    </p>
+    <table>
+      <tr><th>变量名</th><th>值</th><th>说明</th></tr>
+      <tr><td><code>IMAP_USER</code></td><td>你的企业邮箱地址</td><td>如：yourname@company.com</td></tr>
+      <tr><td><code>IMAP_PASS</code></td><td>客户端专用密码</td><td>步骤一生成的密码</td></tr>
+      <tr><td><code>GITHUB_TOKEN</code></td><td>ghp_xxxxxxxx</td><td>已有的 GitHub Token</td></tr>
+      <tr><td><code>GIST_ID</code></td><td>xxxxxxxx</td><td>已有的 Gist ID</td></tr>
+      <tr><td><code>SCAN_DAYS</code></td><td>7</td><td>每次扫描最近几天的邮件</td></tr>
+    </table>
+    <div class="alert alert-info">
+      <code>IMAP_SERVER</code> 默认为 <code>imap.exmail.qq.com</code>，如果使用其他邮箱可单独配置。
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>⏰ 步骤四：配置定时触发器</h2>
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <div class="step-title">添加触发方式</div>
+        <div class="step-desc">在函数页面选择「触发管理」→「新建触发器」→「定时触发」。</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <div class="step-title">设置触发周期</div>
+        <div class="step-desc">
+          推荐每 30 分钟扫描一次：<br>
+          Cron 表达式填写：<code>0 */30 * * * *</code><br>
+          或每天早晚各一次：<code>0 0 9,18 * * * *</code>
+        </div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <div class="step-title">启用触发器</div>
+        <div class="step-desc">保存后，云函数会按设定周期自动执行，扫描邮箱中的新发票。</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>🧪 步骤五：测试运行</h2>
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <div class="step-title">手动触发测试</div>
+        <div class="step-desc">在腾讯云控制台点击「测试」，查看执行日志。如果配置正确，会输出扫描到的发票数量和同步状态。</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <div class="step-title">在工作台拉取发票</div>
+        <div class="step-desc">
+          打开工作台 → 进入「发票」页面 → 点击「🔄 拉取云端发票」。<br>
+          如果云函数已成功写入 Gist，工作台会自动获取并显示待匹配的发票。
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>⚠️ 常见问题</h2>
+    <h3>邮箱连接失败</h3>
+    <p style="font-size:14px">确认企业邮箱已开启 IMAP，并使用<strong>客户端专用密码</strong>而非网页登录密码。</p>
+    <h3>发票信息提取不完整</h3>
+    <p style="font-size:14px">部分 PDF 发票为图片格式，文本提取可能失败。云函数会保留邮件主题和附件信息，你仍可在工作台手动补全。</p>
+    <h3>Gist 写入失败</h3>
+    <p style="font-size:14px">检查 GitHub Token 是否有 <code>gist</code> 权限，以及 Gist ID 是否正确。</p>
+    <h3>费用在哪里查看</h3>
+    <p style="font-size:14px">发票数据写入 Gist 的 <code>invoice_pool.json</code>，工作台通过「拉取云端发票」按钮同步到本地。</p>
+  </div>
+
+  <div class="card">
+    <h2>📁 文件说明</h2>
+    <table>
+      <tr><th>文件</th><th>说明</th></tr>
+      <tr><td><code>invoice_scanner.py</code></td><td>云函数主脚本，包含 IMAP 连接、邮件解析、PDF 文本提取、Gist 同步</td></tr>
+      <tr><td><code>requirements.txt</code></td><td>Python 依赖：requests、PyPDF2、pdfplumber</td></tr>
+    </table>
+  </div>
+
+  <div style="text-align:center;padding:20px;color:var(--text-secondary);font-size:13px">
+    工作台地址：<a href="https://meidi0421.github.io/workbench/" target="_blank">https://meidi0421.github.io/workbench/</a>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>发票自动扫描 - GitHub Actions 部署指南</title>
+  <style>
+    :root { --primary: #2563eb; --primary-light: #eff6ff; --success: #16a34a; --warning: #ea580c; --danger: #dc2626; --text: #1f2937; --text-secondary: #6b7280; --border: #e5e7eb; --radius: 10px; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8fafc; color: var(--text); line-height: 1.7; padding: 20px; }
+    .container { max-width: 720px; margin: 0 auto; }
+    h1 { font-size: 24px; margin-bottom: 8px; }
+    .subtitle { color: var(--text-secondary); font-size: 14px; margin-bottom: 24px; }
+    .card { background: #fff; border-radius: var(--radius); padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    h2 { font-size: 17px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    h3 { font-size: 15px; margin: 16px 0 8px; color: var(--text-secondary); }
+    .step { display: flex; gap: 12px; margin-bottom: 16px; }
+    .step-num { width: 28px; height: 28px; border-radius: 50%; background: var(--primary); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; flex-shrink: 0; }
+    .step-body { flex: 1; }
+    .step-title { font-weight: 600; margin-bottom: 4px; }
+    .step-desc { color: var(--text-secondary); font-size: 14px; }
+    code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 13px; font-family: 'SF Mono', Monaco, monospace; }
+    pre { background: #1e293b; color: #e2e8f0; padding: 16px; border-radius: var(--radius); overflow-x: auto; font-size: 13px; line-height: 1.6; margin: 8px 0; }
+    pre code { background: none; padding: 0; color: inherit; }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; }
+    .tag-green { background: #dcfce7; color: var(--success); }
+    .tag-orange { background: #ffedd5; color: var(--warning); }
+    .tag-blue { background: #dbeafe; color: var(--primary); }
+    .tag-purple { background: #ede9fe; color: #7c3aed; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 8px 0; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+    th { background: #f8fafc; font-weight: 600; font-size: 13px; color: var(--text-secondary); }
+    .alert { padding: 12px 16px; border-radius: var(--radius); font-size: 14px; margin: 12px 0; }
+    .alert-warning { background: #fff7ed; border-left: 4px solid var(--warning); }
+    .alert-info { background: var(--primary-light); border-left: 4px solid var(--primary); }
+    .alert-success { background: #f0fdf4; border-left: 4px solid var(--success); }
+    a { color: var(--primary); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0; }
+    .compare-item { padding: 14px; border-radius: var(--radius); border: 1px solid var(--border); }
+    .compare-item h4 { font-size: 14px; margin-bottom: 8px; }
+    .compare-item ul { font-size: 13px; color: var(--text-secondary); padding-left: 18px; }
+    .compare-item li { margin-bottom: 4px; }
+    .recommend { background: #f0fdf4; border-color: #86efac; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>发票自动扫描 - GitHub Actions 部署指南</h1>
+  <div class="subtitle">用 GitHub 自带的定时任务自动扫描邮箱发票，零成本、免注册</div>
+
+  <div class="card">
+    <h2>🤔 两种方案对比</h2>
+    <div class="compare">
+      <div class="compare-item recommend">
+        <h4><span class="tag tag-green">推荐</span> GitHub Actions</h4>
+        <ul>
+          <li>完全免费（每月 2000 分钟额度）</li>
+          <li>不用注册新账号</li>
+          <li>配置简单，几步搞定</li>
+          <li>代码和任务在一起，好维护</li>
+          <li>每 30 分钟扫描一次</li>
+        </ul>
+      </div>
+      <div class="compare-item">
+        <h4><span class="tag tag-orange">备选</span> 腾讯云 SCF</h4>
+        <ul>
+          <li>免费额度较少（每月 40 万次调用）</li>
+          <li>需要注册腾讯云并实名认证</li>
+          <li>配置稍复杂</li>
+          <li>运行更稳定，国内速度快</li>
+          <li>可设置更频繁的触发</li>
+        </ul>
+      </div>
+    </div>
+    <div class="alert alert-success">
+      <strong>建议：</strong>先用 GitHub Actions 方案，简单快捷。如果以后需要更高频率或更稳定，再迁移到腾讯云。
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>🔧 步骤一：开启企业微信邮箱 IMAP</h2>
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <div class="step-title">登录企业微信邮箱</div>
+        <div class="step-desc">访问 <a href="https://exmail.qq.com/login" target="_blank">https://exmail.qq.com/login</a></div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <div class="step-title">开启 IMAP 服务</div>
+        <div class="step-desc">「设置」→「客户端设置」→ 勾选 <strong>IMAP/SMTP服务</strong></div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <div class="step-title">生成客户端专用密码</div>
+        <div class="step-desc">在「安全登录」或「客户端密码」处生成，保存好这个密码</div>
+      </div>
+    </div>
+    <div class="alert alert-warning">
+      必须使用<strong>客户端专用密码</strong>，不是网页登录密码！
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>🔐 步骤二：在 GitHub 仓库添加 Secrets</h2>
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <div class="step-title">进入仓库 Settings</div>
+        <div class="step-desc">
+          打开你的仓库：<a href="https://github.com/meidi0421/workbench/settings/secrets/actions" target="_blank">https://github.com/meidi0421/workbench</a><br>
+          点击顶部的 <strong>Settings</strong> → 左侧找到 <strong>Secrets and variables</strong> → <strong>Actions</strong>
+        </div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <div class="step-title">点击「New repository secret」添加以下 4 个 Secret</div>
+        <table>
+          <tr><th>Secret 名称</th><th>值</th><th>说明</th></tr>
+          <tr><td><code>IMAP_USER</code></td><td>你的企业邮箱地址</td><td>如：yourname@company.com</td></tr>
+          <tr><td><code>IMAP_PASS</code></td><td>客户端专用密码</td><td>步骤一生成的密码</td></tr>
+          <tr><td><code>GIST_TOKEN</code></td><td>ghp_xxxxxxxx</td><td>你已有的 GitHub Token</td></tr>
+          <tr><td><code>GIST_ID</code></td><td>xxxxxxxx</td><td>你已有的 Gist ID</td></tr>
+        </table>
+        <div class="alert alert-info">
+          注意：Token 名称是 <code>GIST_TOKEN</code>，不是 <code>GITHUB_TOKEN</code>（后者是 GitHub 内置保留名）
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>🚀 步骤三：推送代码并启用 Actions</h2>
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <div class="step-title">代码已准备好</div>
+        <div class="step-desc">
+          <code>.github/workflows/invoice-scanner.yml</code> 已经创建，会随前端代码一起推送到 GitHub。<br>
+          推送成功后，Actions 会自动启用。
+        </div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <div class="step-title">手动触发第一次运行</div>
+        <div class="step-desc">
+          进入仓库的 <strong>Actions</strong> 标签页 → 左侧选择 <strong>Invoice Scanner</strong><br>
+          → 点击右侧 <strong>Run workflow</strong> → 选择 main 分支 → 点击 Run<br>
+          稍等 1-2 分钟，查看运行结果。
+        </div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <div class="step-title">查看运行日志</div>
+        <div class="step-desc">
+          点击运行记录 → 展开 <code>Run invoice scanner</code> 步骤<br>
+          可以看到扫描了多少封邮件、找到多少张发票、同步是否成功。
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>⏰ 定时说明</h2>
+    <p style="font-size:14px;color:var(--text-secondary)">
+      当前配置为<strong>每 30 分钟</strong>自动扫描一次邮箱。<br>
+      扫描到的新发票会自动写入 Gist，你在工作台点击「拉取云端发票」即可同步到本地。
+    </p>
+    <div class="alert alert-info">
+      GitHub Actions 的定时任务可能有几分钟延迟，属于正常现象。
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>🧪 验证方法</h2>
+    <div class="step">
+      <div class="step-num">✓</div>
+      <div class="step-body">
+        <div class="step-title">Actions 运行成功</div>
+        <div class="step-desc">在 GitHub Actions 页面看到绿色 ✓ 标记</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">✓</div>
+      <div class="step-body">
+        <div class="step-title">Gist 中有数据</div>
+        <div class="step-desc">访问你的 Gist 页面，确认 <code>invoice_pool.json</code> 文件存在并有内容</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">✓</div>
+      <div class="step-body">
+        <div class="step-title">工作台能拉取发票</div>
+        <div class="step-desc">打开工作台 → 发票页 → 点击「拉取云端发票」，能看到发票列表</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>⚠️ 常见问题</h2>
+    <h3>Actions 运行失败，提示邮箱连接错误</h3>
+    <p style="font-size:14px">检查 IMAP_USER 和 IMAP_PASS 是否正确，确认使用的是客户端专用密码。</p>
+    <h3>扫描到 0 张发票</h3>
+    <p style="font-size:14px">可能最近几天没有发票邮件，可以调大 SCAN_DAYS 扫描更多天，或手动给邮箱发一封带「发票」关键词的测试邮件。</p>
+    <h3>想修改扫描频率</h3>
+    <p style="font-size:14px">修改 <code>.github/workflows/invoice-scanner.yml</code> 中的 cron 表达式即可。</p>
+  </div>
+
+  <div style="text-align:center;padding:20px;color:var(--text-secondary);font-size:13px">
+    工作台地址：<a href="https://meidi0421.github.io/workbench/" target="_blank">https://meidi0421.github.io/workbench/</a>
+  </div>
+</div>
+</body>
+</html>
