@@ -17,6 +17,14 @@
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js">
 </script>
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3/build/pdf.min.js">
+</script>
+<script>
+  // 设置 PDF.js worker
+  if (typeof pdfjsLib !== 'undefined') {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3/build/pdf.worker.min.js';
+  }
+</script>
 <style>
 /* ============= CSS Variables ============= */
 :root {
@@ -1955,37 +1963,186 @@ const app = createApp({
       }
     }
 
-    function processUploadedInvoice() {
+    function parseInvoiceText(text) {
+      // 从文本中解析发票信息（和云端解析逻辑一致）
+      const result = {};
+      const full_text = text;
+
+      // 发票号码
+      const numMatch = full_text.match(/(?:发票号码|号码|No\.?)[：:\s]*(\d{8,20})/);
+      if (numMatch) result.invoiceNumber = numMatch[1];
+
+      // 发票代码
+      const codeMatch = full_text.match(/(?:发票代码|代码)[：:\s]*(\d{10,12})/);
+      if (codeMatch) result.invoiceCode = codeMatch[1];
+
+      // 金额 - 多种模式
+      const amountPatterns = [
+        /(?:价税合计|合计金额|总计|总金额)[（(]大写[)）][^\n]*?([¥￥]\s*[\d,]+\.?\d{0,2})/,
+        /(?:价税合计|合计金额|总计)[：:\s]*[¥￥]?\s*([\d,]+\.?\d{0,2})/,
+        /[¥￥]\s*([\d,]+\.\d{2})(?=\D*$|\D*\n)/,
+        /金额[：:\s]*([\d,]+\.?\d{0,2})/,
+      ];
+      for (const p of amountPatterns) {
+        const m = full_text.match(p);
+        if (m) {
+          const amt = parseFloat(m[1].replace(/[,¥￥]/g, ''));
+          if (!isNaN(amt)) { result.amount = amt; break; }
+        }
+      }
+
+      // 日期
+      const currentYear = new Date().getFullYear();
+      const datePatterns = [
+        /(?:开票日期|开票时间|发票日期)[：:\s]*(\d{4}[年/-]\d{1,2}[月/-]\d{1,2}[日]?)/,
+        /(\d{4}[年/-]\d{1,2}[月/-]\d{1,2}[日]?)/,
+      ];
+      for (const p of datePatterns) {
+        const m = full_text.match(p);
+        if (m) {
+          let ds = m[1].replace(/[年月日]/g, '-').replace(/\//g, '-').replace(/-+/g, '-');
+          if (ds.endsWith('-')) ds = ds.slice(0, -1);
+          const parts = ds.split('-');
+          if (parts.length === 3) {
+            const y = parseInt(parts[0]);
+            if (y >= currentYear - 2 && y <= currentYear + 1) {
+              result.date = `${y}-${parts[1].padStart(2,'0')}-${parts[2].padStart(2,'0')}`;
+              break;
+            }
+          }
+        }
+      }
+
+      // 销售方
+      const sellerPatterns = [
+        /(?:销售方|销方|销售单位)[：:\s]*\n?\s*名称[：:\s]*([^\n]{2,50})/,
+        /(?:销售方|销方)[：:\s]*([^\n]{2,50})/,
+        /来自([^\n]{2,30}?)的电子发票/,
+        /【([^】]{2,30}?)】开具的发票/,
+      ];
+      for (const p of sellerPatterns) {
+        const m = full_text.match(p);
+        if (m) {
+          const s = m[1].trim();
+          if (!['电子发票','增值税','普通发票','专用发票','发票'].includes(s)) {
+            result.seller = s; break;
+          }
+        }
+      }
+
+      // 校验码
+      const checkMatch = full_text.match(/校验码[：:\s]*(\d{6,20})/);
+      if (checkMatch) result.checkCode = checkMatch[1];
+
+      // 税额
+      const taxMatch = full_text.match(/(?:税额|税金)[：:\s]*([\d,]+\.?\d{0,2})/);
+      if (taxMatch) {
+        const t = parseFloat(taxMatch[1].replace(',',''));
+        if (!isNaN(t)) result.taxAmount = t;
+      }
+
+      return result;
+    }
+
+    async function processUploadedInvoice() {
       if (!uploadedInvoice.value) { showToast('请先上传发票文件', 'error'); return; }
-      // Create a new expense entry with the invoice
-      const expense = {
-        id: genId(),
-        date: new Date().toISOString().slice(0,10),
-        amount: 0,
-        category: '其他',
-        description: `电子发票：${uploadedInvoice.value.name}`,
-        paymentMethod: '',
-        hasInvoice: true,
-        invoiceType: '电子发票',
-        invoiceNumber: '',
-        invoiceLocation: '已上传电子票',
-        invoiceFile: { ...uploadedInvoice.value },
-        createdAt: Date.now()
+      
+      showToast('正在识别发票...', 'info');
+      
+      const file = uploadedInvoice.value;
+      let parsed = {};
+      
+      if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+        // PDF 文件 - 用 PDF.js 提取文本
+        try {
+          // 将 dataURL 转为 Uint8Array
+          const dataUrl = file.data;
+          const base64 = dataUrl.split(',')[1];
+          const binaryStr = atob(base64);
+          const bytes = new Uint8Array(binaryStr.length);
+          for (let i = 0; i < binaryStr.length; i++) {
+            bytes[i] = binaryStr.charCodeAt(i);
+          }
+          
+          // 加载 PDF
+          const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+          let fullText = '';
+          
+          // 提取所有页面的文本
+          for (let i = 1; i <= Math.min(pdf.numPages, 3); i++) {
+            const page = await pdf.getPage(i);
+            const textContent = await page.getTextContent();
+            const pageText = textContent.items.map(item => item.str).join('\n');
+            fullText += pageText + '\n';
+          }
+          
+          // 解析发票信息
+          parsed = parseInvoiceText(fullText);
+        } catch(e) {
+          console.error('PDF 解析失败:', e);
+          // 失败则从文件名解析
+          parsed = parseInvoiceText(file.name);
+        }
+      } else if (file.type.startsWith('image/')) {
+        // 图片文件 - 前端无法 OCR，从文件名解析
+        parsed = parseInvoiceText(file.name);
+        showToast('图片发票已上传，暂不支持图片识别，请手动补充信息', 'info');
+      }
+      
+      // 如果解析结果太少，再从文件名补充
+      if (!parsed.amount || !parsed.seller) {
+        const filenameParsed = parseInvoiceText(file.name);
+        parsed = { ...filenameParsed, ...parsed };
+      }
+      
+      // 创建发票池条目
+      const invId = genId();
+      const invoice = {
+        id: invId,
+        subject: file.name,
+        from: '手动上传',
+        emailDate: new Date().toISOString(),
+        scanTime: new Date().toISOString(),
+        attachments: [{ filename: file.name, contentType: file.type, size: file.size }],
+        status: 'pending',
+        matchedExpenseId: null,
+        matchConfidence: 0,
+        matchType: '',
+        source: 'manual',
+        amount: parsed.amount || null,
+        date: parsed.date || null,
+        invoiceNumber: parsed.invoiceNumber || null,
+        invoiceCode: parsed.invoiceCode || null,
+        seller: parsed.seller || null,
+        checkCode: parsed.checkCode || null,
+        taxAmount: parsed.taxAmount || null,
+        type: '电子发票',
+        _parsed: parsed,
+        fileData: file.data
       };
-      expenses.value.push(expense);
+      
+      invoicePool.value.push(invoice);
       saveData();
-      showToast('电子发票已保存，请编辑补充金额和类别信息');
+      
+      // 尝试自动匹配
+      setTimeout(() => {
+        matchInvoices();
+      }, 300);
+      
       uploadedInvoice.value = null;
       showInvoiceUpload.value = false;
-      // Navigate to record to edit
-      navigate('record');
-      // Pre-fill the form
-      form.value.hasInvoice = true;
-      form.value.invoiceType = '电子发票';
-      form.value.invoiceLocation = '已上传电子票';
-      form.value.invoiceFile = expense.invoiceFile;
-      form.value.description = `电子发票：${expense.invoiceFile.name}`;
-      showExpenseForm.value = true;
+      
+      // 显示结果
+      if (parsed.amount && parsed.seller) {
+        showToast(`识别成功：¥${parsed.amount} - ${parsed.seller.slice(0,15)}`);
+      } else if (parsed.amount) {
+        showToast(`识别成功：¥${parsed.amount}`);
+      } else {
+        showToast('发票已保存，请点击查看并补充信息');
+      }
+      
+      // 切换到待匹配标签
+      invoiceTab.value = 'pending';
     }
 
     // Edit / Delete
