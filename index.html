@@ -811,9 +811,13 @@ input, select, textarea, button { font-size: 16px; } /* prevent iOS zoom */
         <div class="card">
           <div class="card-title">ℹ️ 关于</div>
           <div style="font-size:13px;color:var(--text-secondary);line-height:2">
-            <div><strong>我的工作台 · 记账系统</strong> v2.0</div>
+            <div><strong>我的工作台 · 记账系统</strong> v2.1</div>
             <div>支持云端同步，多设备数据自动保持一致。</div>
             <div>数据通过 GitHub Gist 加密存储，仅您授权的人员可访问。</div>
+          </div>
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-secondary btn-sm" @click="checkForUpdates">🔄 检查更新</button>
+            <button class="btn btn-secondary btn-sm" @click="clearCacheAndReload">🧹 清除缓存并刷新</button>
           </div>
         </div>
       </div>
@@ -1790,6 +1794,63 @@ const app = createApp({
       setTimeout(() => { toasts.value.shift(); }, 3000);
     }
 
+    // 检查更新
+    async function checkForUpdates() {
+      showToast('正在检查更新...', 'info');
+      try {
+        const resp = await fetch('./?v=' + Date.now(), { cache: 'no-store' });
+        const html = await resp.text();
+        const versionMatch = html.match(/v(\d+\.\d+)/);
+        const currentMatch = document.title.match(/v(\d+\.\d+)/) || document.body.innerHTML.match(/v(\d+\.\d+)/);
+        const remoteVersion = versionMatch ? versionMatch[1] : '未知';
+        const currentVersion = currentMatch ? currentMatch[1] : '未知';
+        if (remoteVersion !== currentVersion) {
+          showToast(`发现新版本 v${remoteVersion}，正在刷新...`, 'info');
+          setTimeout(() => {
+            if (navigator.serviceWorker) {
+              navigator.serviceWorker.getRegistrations().then(regs => {
+                regs.forEach(r => r.unregister());
+                location.reload(true);
+              });
+            } else {
+              location.reload(true);
+            }
+          }, 1500);
+        } else {
+          showToast(`已是最新版本 v${currentVersion}`);
+        }
+      } catch(e) {
+        showToast('检查更新失败：' + e.message, 'error');
+      }
+    }
+
+    // 清除缓存并刷新
+    function clearCacheAndReload() {
+      showToast('正在清除缓存...', 'info');
+      // 清除所有 caches
+      if (window.caches) {
+        caches.keys().then(keys => {
+          return Promise.all(keys.map(k => caches.delete(k)));
+        }).then(() => {
+          // 取消注册 SW
+          if (navigator.serviceWorker) {
+            return navigator.serviceWorker.getRegistrations().then(regs => {
+              return Promise.all(regs.map(r => r.unregister()));
+            });
+          }
+        }).then(() => {
+          location.replace('./?v=' + Date.now());
+        });
+      } else if (navigator.serviceWorker) {
+        navigator.serviceWorker.getRegistrations().then(regs => {
+          regs.forEach(r => r.unregister());
+          location.replace('./?v=' + Date.now());
+        });
+      } else {
+        location.replace('./?v=' + Date.now());
+      }
+    }
+
     // Chat
     function scrollChat() {
       nextTick(() => {
@@ -2427,7 +2488,7 @@ const app = createApp({
       handleInvoiceUploadFromPage, processUploadedInvoiceFile,
       editExpense, saveEdit, closeEditModal, deleteExpense,
       openInvoiceDetail, resetFilters,
-      exportData, triggerImport, importData, confirmClear, showToast,
+      exportData, triggerImport, importData, confirmClear, showToast, checkForUpdates, clearCacheAndReload,
       // Invoice pool
       invoicePool, invoiceTab, linkModal,
       pullRemoteInvoices, linkInvoiceToExpense, unlinkInvoice, getLinkedExpense, openLinkModal, closeLinkModal,
