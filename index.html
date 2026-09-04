@@ -623,19 +623,10 @@ input, select, textarea, button { font-size: 16px; } /* prevent iOS zoom */
               <input ref="invoiceUploadInput" type="file" accept=".pdf,image/*" style="display:none" @change="handleInvoiceUploadFromPage" />
               <div class="icon">📎</div>
               <div class="text">点击上传电子发票 <strong>(PDF/图片)</strong></div>
-              <div class="hint">支持 PDF、PNG、JPG 格式，系统将自动识别并关联支出</div>
+              <div class="hint">支持 PDF、PNG、JPG 格式，上传后自动识别并匹配</div>
             </label>
-            <div v-if="uploadedInvoice" class="invoice-preview">
-              <span class="file-icon">📄</span>
-              <div class="info">
-                <div class="name">{{uploadedInvoice.name}}</div>
-                <div class="size">{{(uploadedInvoice.size/1024).toFixed(1)}} KB</div>
-              </div>
-              <span class="remove-btn" @click="uploadedInvoice=null">✕</span>
-            </div>
-            <div v-if="uploadedInvoice" style="margin-top:12px;display:flex;gap:8px">
-              <button class="btn btn-primary btn-sm" @click="processUploadedInvoice">🔍 识别并关联</button>
-              <button class="btn btn-outline btn-sm" @click="showInvoiceUpload=false;uploadedInvoice=null">取消</button>
+            <div style="margin-top:12px;text-align:right">
+              <button class="btn btn-outline btn-sm" @click="showInvoiceUpload=false">关闭</button>
             </div>
           </div>
 
@@ -1940,16 +1931,112 @@ const app = createApp({
       e.target.value = '';
     }
 
-    function handleInvoiceUploadFromPage(e) {
+    async function handleInvoiceUploadFromPage(e) {
       const file = e.target.files[0];
       if (!file) return;
+      e.target.value = '';
+      
+      showToast('正在识别发票...', 'info');
+      
       const reader = new FileReader();
-      reader.onload = (ev) => {
-        uploadedInvoice.value = { name: file.name, size: file.size, type: file.type, data: ev.target.result };
-        showToast(`已上传：${file.name}`);
+      reader.onload = async (ev) => {
+        const fileData = { name: file.name, size: file.size, type: file.type, data: ev.target.result };
+        await processUploadedInvoiceFile(fileData);
       };
       reader.readAsDataURL(file);
-      e.target.value = '';
+    }
+    
+    async function processUploadedInvoiceFile(file) {
+      let parsed = {};
+      
+      if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+        try {
+          // 将 dataURL 转为 Uint8Array
+          const dataUrl = file.data;
+          const base64 = dataUrl.split(',')[1];
+          const binaryStr = atob(base64);
+          const bytes = new Uint8Array(binaryStr.length);
+          for (let i = 0; i < binaryStr.length; i++) {
+            bytes[i] = binaryStr.charCodeAt(i);
+          }
+          
+          // 加载 PDF
+          const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+          let fullText = '';
+          
+          // 提取所有页面的文本
+          for (let i = 1; i <= Math.min(pdf.numPages, 3); i++) {
+            const page = await pdf.getPage(i);
+            const textContent = await page.getTextContent();
+            const pageText = textContent.items.map(item => item.str).join('\n');
+            fullText += pageText + '\n';
+          }
+          
+          // 解析发票信息
+          parsed = parseInvoiceText(fullText);
+        } catch(e) {
+          console.error('PDF 解析失败:', e);
+          parsed = parseInvoiceText(file.name);
+        }
+      } else if (file.type.startsWith('image/')) {
+        parsed = parseInvoiceText(file.name);
+      }
+      
+      // 如果解析结果太少，再从文件名补充
+      if (!parsed.amount || !parsed.seller) {
+        const filenameParsed = parseInvoiceText(file.name);
+        parsed = { ...filenameParsed, ...parsed };
+      }
+      
+      // 创建发票池条目
+      const invId = genId();
+      const invoice = {
+        id: invId,
+        subject: file.name,
+        from: '手动上传',
+        emailDate: new Date().toISOString(),
+        scanTime: new Date().toISOString(),
+        attachments: [{ filename: file.name, contentType: file.type, size: file.size }],
+        status: 'pending',
+        matchedExpenseId: null,
+        matchConfidence: 0,
+        matchType: '',
+        source: 'manual',
+        amount: parsed.amount || null,
+        date: parsed.date || null,
+        invoiceNumber: parsed.invoiceNumber || null,
+        invoiceCode: parsed.invoiceCode || null,
+        seller: parsed.seller || null,
+        checkCode: parsed.checkCode || null,
+        taxAmount: parsed.taxAmount || null,
+        type: '电子发票',
+        _parsed: parsed,
+        fileData: file.data
+      };
+      
+      invoicePool.value.push(invoice);
+      saveData();
+      
+      // 隐藏上传区域
+      showInvoiceUpload.value = false;
+      uploadedInvoice.value = null;
+      
+      // 自动匹配
+      setTimeout(() => {
+        matchInvoices();
+      }, 300);
+      
+      // 显示结果
+      if (parsed.amount && parsed.seller) {
+        showToast(`识别成功：¥${parsed.amount} - ${parsed.seller.slice(0,15)}`);
+      } else if (parsed.amount) {
+        showToast(`识别成功：¥${parsed.amount}`);
+      } else {
+        showToast('发票已保存，请点击查看并补充信息');
+      }
+      
+      // 切换到待匹配标签
+      invoiceTab.value = 'pending';
     }
 
     function autoParseInvoiceInfo(filename) {
@@ -2042,107 +2129,6 @@ const app = createApp({
       }
 
       return result;
-    }
-
-    async function processUploadedInvoice() {
-      if (!uploadedInvoice.value) { showToast('请先上传发票文件', 'error'); return; }
-      
-      showToast('正在识别发票...', 'info');
-      
-      const file = uploadedInvoice.value;
-      let parsed = {};
-      
-      if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
-        // PDF 文件 - 用 PDF.js 提取文本
-        try {
-          // 将 dataURL 转为 Uint8Array
-          const dataUrl = file.data;
-          const base64 = dataUrl.split(',')[1];
-          const binaryStr = atob(base64);
-          const bytes = new Uint8Array(binaryStr.length);
-          for (let i = 0; i < binaryStr.length; i++) {
-            bytes[i] = binaryStr.charCodeAt(i);
-          }
-          
-          // 加载 PDF
-          const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
-          let fullText = '';
-          
-          // 提取所有页面的文本
-          for (let i = 1; i <= Math.min(pdf.numPages, 3); i++) {
-            const page = await pdf.getPage(i);
-            const textContent = await page.getTextContent();
-            const pageText = textContent.items.map(item => item.str).join('\n');
-            fullText += pageText + '\n';
-          }
-          
-          // 解析发票信息
-          parsed = parseInvoiceText(fullText);
-        } catch(e) {
-          console.error('PDF 解析失败:', e);
-          // 失败则从文件名解析
-          parsed = parseInvoiceText(file.name);
-        }
-      } else if (file.type.startsWith('image/')) {
-        // 图片文件 - 前端无法 OCR，从文件名解析
-        parsed = parseInvoiceText(file.name);
-        showToast('图片发票已上传，暂不支持图片识别，请手动补充信息', 'info');
-      }
-      
-      // 如果解析结果太少，再从文件名补充
-      if (!parsed.amount || !parsed.seller) {
-        const filenameParsed = parseInvoiceText(file.name);
-        parsed = { ...filenameParsed, ...parsed };
-      }
-      
-      // 创建发票池条目
-      const invId = genId();
-      const invoice = {
-        id: invId,
-        subject: file.name,
-        from: '手动上传',
-        emailDate: new Date().toISOString(),
-        scanTime: new Date().toISOString(),
-        attachments: [{ filename: file.name, contentType: file.type, size: file.size }],
-        status: 'pending',
-        matchedExpenseId: null,
-        matchConfidence: 0,
-        matchType: '',
-        source: 'manual',
-        amount: parsed.amount || null,
-        date: parsed.date || null,
-        invoiceNumber: parsed.invoiceNumber || null,
-        invoiceCode: parsed.invoiceCode || null,
-        seller: parsed.seller || null,
-        checkCode: parsed.checkCode || null,
-        taxAmount: parsed.taxAmount || null,
-        type: '电子发票',
-        _parsed: parsed,
-        fileData: file.data
-      };
-      
-      invoicePool.value.push(invoice);
-      saveData();
-      
-      // 尝试自动匹配
-      setTimeout(() => {
-        matchInvoices();
-      }, 300);
-      
-      uploadedInvoice.value = null;
-      showInvoiceUpload.value = false;
-      
-      // 显示结果
-      if (parsed.amount && parsed.seller) {
-        showToast(`识别成功：¥${parsed.amount} - ${parsed.seller.slice(0,15)}`);
-      } else if (parsed.amount) {
-        showToast(`识别成功：¥${parsed.amount}`);
-      } else {
-        showToast('发票已保存，请点击查看并补充信息');
-      }
-      
-      // 切换到待匹配标签
-      invoiceTab.value = 'pending';
     }
 
     // Edit / Delete
