@@ -22,7 +22,7 @@ IMAP_SERVER = os.environ.get('IMAP_SERVER', 'imap.exmail.qq.com')  # 企业微�
 IMAP_PORT = int(os.environ.get('IMAP_PORT', '993'))
 IMAP_USER = os.environ.get('IMAP_USER')          # 邮箱账号
 IMAP_PASS = os.environ.get('IMAP_PASS')          # 邮箱密码/客户端专用密码
-GITHUB_TOKEN = os.environ.get('GIST_TOKEN') or os.environ.get('GITHUB_TOKEN')    # GitHub Personal Access Token
+GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')    # GitHub Personal Access Token
 GIST_ID = os.environ.get('GIST_ID')              # Gist ID
 SCAN_DAYS = int(os.environ.get('SCAN_DAYS', '7'))  # 扫描最近N天
 
@@ -131,77 +131,62 @@ def parse_invoice(text, subject="", body=""):
     if number_match:
         result['invoiceNumber'] = number_match.group(1)
 
-    # 3. 金额 - 多种模式匹配
-    # 优先匹配"合计金额"、"价税合计"后面的金额
+    # 3. 金额 - 多种模式匹配，优先对价税合计
+    # 注意：PDF 提取的文本可能跨行，所以用 [\s\S]*? 跨行匹配
     amount_patterns = [
+        # 价税合计（最优先）- 支持跨行和各种格式
+        r'价税合计[\s\S]{0,100}?[¥￥]\s*([\d,]+\.?\d{0,2})',
+        r'价税合计[\s\S]{0,100}?小写[\s\S]{0,50}?[¥￥]?\s*([\d,]+\.?\d{0,2})',
+        r'合计金额[\s\S]{0,100}?[¥￥]\s*([\d,]+\.?\d{0,2})',
+        r'[（(]小写[)）][\s\S]{0,50}?[¥￥]\s*([\d,]+\.?\d{0,2})',
+        # 单行价税合计
         r'(?:价税合计|合计金额|总计|总金额)[（(]大写[)）][^\n]*?([¥￥]\s*[\d,]+\.?\d{0,2})',
         r'(?:价税合计|合计金额|总计)[：:\s]*[¥￥]?\s*([\d,]+\.?\d{0,2})',
-        r'[¥￥]\s*([\d,]+\.\d{2})(?=\D*$|\D*\n)',  # 行尾或段尾的 ¥金额
-        r'金额[：:\s]*([\d,]+\.?\d{0,2})',
+        # 最后兜底：取最后一个带 ¥ 的金额
+        r'[¥￥]\s*([\d,]+\.\d{2})(?=\D*$|\D*\n)',
     ]
     for pattern in amount_patterns:
         amt_match = re.search(pattern, full_text)
         if amt_match:
             amt_str = amt_match.group(1).replace(',', '').replace('¥', '').replace('￥', '').strip()
             try:
-                result['amount'] = float(amt_str)
-                break
+                amount = float(amt_str)
+                if amount > 0:
+                    result['amount'] = amount
+                    break
             except:
                 continue
 
-    # 4. 日期 - 优先找开票日期，过滤不合理的旧日期
-    current_year = datetime.now().year
-    min_year = current_year - 2  # 只接受近两年内的发票
-    
-    date_candidates = []
-    
-    # 优先匹配"开票日期""开票时间"附近的日期
-    priority_patterns = [
-        r'(?:开票日期|开票时间|发票日期)[：:\s]*(\d{4}[年/-]\d{1,2}[月/-]\d{1,2}[日]?)',
-        r'(?:开票日期|开票时间)[^\n]{0,20}?(\d{4}[年/-]\d{1,2}[月/-]\d{1,2})',
-    ]
-    for pattern in priority_patterns:
-        for m in re.finditer(pattern, full_text):
-            date_candidates.append((m.group(1), 100))  # 高优先级
-    
-    # 普通日期匹配
-    normal_patterns = [
+    # 4. 日期
+    date_patterns = [
+        r'(\d{4}[年/-]\d{1,2}[月/-]\d{1,2})',
         r'(\d{4}[年/-]\d{1,2}[月/-]\d{1,2}[日]?)',
     ]
-    for pattern in normal_patterns:
-        for m in re.finditer(pattern, full_text):
-            date_candidates.append((m.group(1), 50))  # 普通优先级
-    
-    for date_str, priority in sorted(date_candidates, key=lambda x: -x[1]):
-        date_str = date_str.replace('年', '-').replace('月', '-').replace('日', '').replace('/', '-')
-        try:
-            parts = date_str.split('-')
-            if len(parts) == 3:
-                y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
-                # 过滤不合理的年份
-                if min_year <= y <= current_year + 1:
-                    result['date'] = f"{y:04d}-{m:02d}-{d:02d}"
+    for pattern in date_patterns:
+        date_match = re.search(pattern, full_text)
+        if date_match:
+            date_str = date_match.group(1)
+            date_str = date_str.replace('年', '-').replace('月', '-').replace('日', '').replace('/', '-')
+            # 标准化为 YYYY-MM-DD
+            try:
+                parts = date_str.split('-')
+                if len(parts) == 3:
+                    y, m, d = parts
+                    result['date'] = f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
                     break
-        except:
-            continue
+            except:
+                continue
 
     # 5. 销售方名称
     seller_patterns = [
         r'(?:销售方|销方|销售单位)[：:\s]*\n?\s*名称[：:\s]*([^\n]{2,50})',
         r'(?:销售方|销方)[：:\s]*([^\n]{2,50})',
-        r'来自([^\n]{2,30}?)的电子发票',  # 邮件正文格式：来自XXX的电子发票
-        r'【([^】]{2,30}?)】开具的发票',     # 【XXX】开具的发票
-        r'【([^】]{2,30}?)】.*发票',        # 【XXX】...发票
-        r'([\u4e00-\u9fa5]{2,20}(?:公司|饭店|酒店|餐厅|菜馆|商店|超市|餐饮|服务|科技|商贸|有限公司|股份有限公司))',  # 通用公司名匹配
     ]
     for pattern in seller_patterns:
         seller_match = re.search(pattern, full_text)
         if seller_match:
-            seller = seller_match.group(1).strip()
-            # 过滤掉明显不是销售方的词
-            if seller not in ['电子发票', '增值税', '普通发票', '专用发票', '发票']:
-                result['seller'] = seller
-                break
+            result['seller'] = seller_match.group(1).strip()
+            break
 
     # 6. 购买方名称
     buyer_patterns = [
