@@ -1936,21 +1936,63 @@ const app = createApp({
       if (!file) return;
       e.target.value = '';
       
-      showToast('正在识别发票...', 'info');
-      
-      const reader = new FileReader();
-      reader.onload = async (ev) => {
-        const fileData = { name: file.name, size: file.size, type: file.type, data: ev.target.result };
-        await processUploadedInvoiceFile(fileData);
-      };
-      reader.readAsDataURL(file);
+      try {
+        showToast('正在识别发票...', 'info');
+        
+        const reader = new FileReader();
+        reader.onload = async (ev) => {
+          try {
+            const fileData = { name: file.name, size: file.size, type: file.type, data: ev.target.result };
+            await processUploadedInvoiceFile(fileData);
+          } catch(err) {
+            console.error('处理发票失败:', err);
+            // 降级：至少保存文件到发票池
+            try {
+              const invId = genId();
+              invoicePool.value.push({
+                id: invId,
+                subject: file.name,
+                from: '手动上传',
+                emailDate: new Date().toISOString(),
+                scanTime: new Date().toISOString(),
+                attachments: [{ filename: file.name, contentType: file.type, size: file.size }],
+                status: 'pending',
+                matchedExpenseId: null,
+                matchConfidence: 0,
+                matchType: '',
+                source: 'manual',
+                amount: null,
+                date: null,
+                invoiceNumber: null,
+                invoiceCode: null,
+                seller: null,
+                type: '电子发票',
+                fileData: ev.target.result
+              });
+              saveData();
+              showInvoiceUpload.value = false;
+              invoiceTab.value = 'pending';
+              showToast('发票已保存（识别失败，请手动补充信息）');
+            } catch(e2) {
+              showToast('上传失败：' + err.message, 'error');
+            }
+          }
+        };
+        reader.onerror = () => {
+          showToast('文件读取失败', 'error');
+        };
+        reader.readAsDataURL(file);
+      } catch(err) {
+        showToast('上传失败：' + err.message, 'error');
+      }
     }
     
     async function processUploadedInvoiceFile(file) {
       let parsed = {};
       
       if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
-        try {
+        if (typeof pdfjsLib !== 'undefined') {
+          try {
           // 将 dataURL 转为 Uint8Array
           const dataUrl = file.data;
           const base64 = dataUrl.split(',')[1];
@@ -1976,6 +2018,10 @@ const app = createApp({
           parsed = parseInvoiceText(fullText);
         } catch(e) {
           console.error('PDF 解析失败:', e);
+          parsed = parseInvoiceText(file.name);
+          }
+        } else {
+          // PDF.js 未加载，从文件名解析
           parsed = parseInvoiceText(file.name);
         }
       } else if (file.type.startsWith('image/')) {
@@ -2371,7 +2417,7 @@ const app = createApp({
       totalAllAmount, invoicedAmountAll, invoicedRatioAll, earliestDate, latestDate,
       navigate, formatNumber, sendChat, sendQuick, saveParsed, editParsed,
       saveManualExpense, resetForm, triggerInvoiceUpload, handleInvoiceUpload,
-      handleInvoiceUploadFromPage, processUploadedInvoice,
+      handleInvoiceUploadFromPage, processUploadedInvoiceFile,
       editExpense, saveEdit, closeEditModal, deleteExpense,
       openInvoiceDetail, resetFilters,
       exportData, triggerImport, importData, confirmClear, showToast,
