@@ -2109,18 +2109,25 @@ const app = createApp({
       const codeMatch = full_text.match(/(?:发票代码|代码)[：:\s]*(\d{10,12})/);
       if (codeMatch) result.invoiceCode = codeMatch[1];
 
-      // 金额 - 多种模式
+      // 金额 - 优先对价税合计，再匹配其他
+      // 注意：PDF 提取的文本可能换行，所以用 [\s\S]*? 跨行匹配
       const amountPatterns = [
+        // 价税合计（最优先）- 支持跨行和各种格式
+        /价税合计[\s\S]{0,100}?[¥￥]\s*([\d,]+\.?\d{0,2})/,
+        /价税合计[\s\S]{0,100}?小写[\s\S]{0,50}?[¥￥]?\s*([\d,]+\.?\d{0,2})/,
+        /合计金额[\s\S]{0,100}?[¥￥]\s*([\d,]+\.?\d{0,2})/,
+        /[（(]小写[)）][\s\S]{0,50}?[¥￥]\s*([\d,]+\.?\d{0,2})/,
+        // 单行价税合计
         /(?:价税合计|合计金额|总计|总金额)[（(]大写[)）][^\n]*?([¥￥]\s*[\d,]+\.?\d{0,2})/,
         /(?:价税合计|合计金额|总计)[：:\s]*[¥￥]?\s*([\d,]+\.?\d{0,2})/,
+        // 最后兜底：取最后一个带 ¥ 的金额
         /[¥￥]\s*([\d,]+\.\d{2})(?=\D*$|\D*\n)/,
-        /金额[：:\s]*([\d,]+\.?\d{0,2})/,
       ];
       for (const p of amountPatterns) {
         const m = full_text.match(p);
         if (m) {
           const amt = parseFloat(m[1].replace(/[,¥￥]/g, ''));
-          if (!isNaN(amt)) { result.amount = amt; break; }
+          if (!isNaN(amt) && amt > 0) { result.amount = amt; break; }
         }
       }
 
