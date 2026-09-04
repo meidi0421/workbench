@@ -173,12 +173,19 @@ def parse_invoice(text, subject="", body=""):
     seller_patterns = [
         r'(?:销售方|销方|销售单位)[：:\s]*\n?\s*名称[：:\s]*([^\n]{2,50})',
         r'(?:销售方|销方)[：:\s]*([^\n]{2,50})',
+        r'来自([^\n]{2,30}?)的电子发票',  # 邮件正文格式：来自XXX的电子发票
+        r'【([^】]{2,30}?)】开具的发票',     # 【XXX】开具的发票
+        r'【([^】]{2,30}?)】.*发票',        # 【XXX】...发票
+        r'([\u4e00-\u9fa5]{2,20}(?:公司|饭店|酒店|餐厅|菜馆|商店|超市|餐饮|服务|科技|商贸|有限公司|股份有限公司))',  # 通用公司名匹配
     ]
     for pattern in seller_patterns:
         seller_match = re.search(pattern, full_text)
         if seller_match:
-            result['seller'] = seller_match.group(1).strip()
-            break
+            seller = seller_match.group(1).strip()
+            # 过滤掉明显不是销售方的词
+            if seller not in ['电子发票', '增值税', '普通发票', '专用发票', '发票']:
+                result['seller'] = seller
+                break
 
     # 6. 购买方名称
     buyer_patterns = [
