@@ -1433,44 +1433,92 @@ const app = createApp({
       const invAmount = parseFloat(inv.amount);
       if (!invAmount || isNaN(invAmount)) return null;
       const invDate = inv.date ? new Date(inv.date) : null;
+      const invSeller = inv.seller || '';
       let best = null;
       let bestScore = 0;
       for (const exp of expenses.value) {
         if (exp.invoiceLinked) continue;
         let score = 0;
         let type = '';
-        // Amount match (most important)
         const expAmount = parseFloat(exp.amount);
+        const expDesc = (exp.description || '') + (exp.invoiceLocation || '');
+
+        // 1. 金额匹配（最重要）
         if (Math.abs(invAmount - expAmount) < 0.01) {
           score += 60;
           type = '金额完全匹配';
-        } else if (Math.abs(invAmount - expAmount * 1.13) < 0.5 || Math.abs(invAmount * 1.13 - expAmount) < 0.5) {
-          score += 40;
+        } else if (Math.abs(invAmount - expAmount * 1.13) < 1 || Math.abs(invAmount * 1.13 - expAmount) < 1) {
+          score += 45;
           type = '含税金额匹配';
-        } else if (Math.abs(invAmount - expAmount) / Math.max(invAmount, expAmount) < 0.05) {
-          score += 30;
+        } else if (Math.abs(invAmount - expAmount) / Math.max(invAmount, expAmount) < 0.1) {
+          score += 35;
           type = '金额近似匹配';
+        } else if (Math.abs(invAmount - expAmount) / Math.max(invAmount, expAmount) < 0.2) {
+          score += 20;
+          type = '金额接近';
         }
-        // Date match
+
+        // 2. 日期匹配
         if (invDate && exp.date) {
           const expDate = new Date(exp.date);
           const diffDays = Math.abs((invDate - expDate) / (1000 * 60 * 60 * 24));
           if (diffDays === 0) {
-            score += 30;
+            score += 25;
             type += type ? ' + 日期相同' : '日期相同';
           } else if (diffDays <= 3) {
             score += 20;
             type += type ? ' + 日期接近' : '日期接近';
           } else if (diffDays <= 7) {
-            score += 10;
+            score += 12;
+            type += type ? ' + 日期相近' : '日期相近';
+          } else if (diffDays <= 15) {
+            score += 6;
           }
         }
+
+        // 3. 商家名称/描述关键词匹配（新增）
+        if (invSeller && expDesc) {
+          const sellerLower = invSeller.toLowerCase();
+          const descLower = expDesc.toLowerCase();
+          // 提取商家关键词（去掉"有限""公司""餐饮""服务"等后缀）
+          const sellerKeywords = [];
+          const cleanSeller = invSeller.replace(/(有限|公司|股份|集团|餐饮|服务|科技|商贸|酒店|饭店|菜馆|餐厅|商店|超市)/g, '');
+          // 提取 2-4 字的关键词
+          for (let len = 4; len >= 2; len--) {
+            for (let i = 0; i <= cleanSeller.length - len; i++) {
+              const kw = cleanSeller.substring(i, i + len);
+              if (kw.length >= 2 && /[\u4e00-\u9fa5]/.test(kw)) {
+                sellerKeywords.push(kw);
+              }
+            }
+          }
+          // 检查描述中是否包含商家关键词
+          let keywordMatch = false;
+          for (const kw of sellerKeywords.slice(0, 10)) {
+            if (descLower.includes(kw.toLowerCase())) {
+              score += 20;
+              type += type ? ` + 商家匹配(${kw})` : `商家匹配(${kw})`;
+              keywordMatch = true;
+              break;
+            }
+          }
+          // 如果描述里有"抖音""刘大厨""金灿灿"等独特关键词，加分更多
+          const uniqueKeywords = ['抖音', '刘大厨', '金灿灿', '仓乔佳', '山姆', '淘宝', '拼多多', '京东'];
+          for (const uk of uniqueKeywords) {
+            if (sellerLower.includes(uk) && descLower.includes(uk)) {
+              score += 15;
+              break;
+            }
+          }
+        }
+
         if (score > bestScore) {
           bestScore = score;
           best = { id: exp.id, confidence: score, type };
         }
       }
-      if (bestScore >= 80) {
+      // 降低匹配阈值：60分以上就自动匹配
+      if (bestScore >= 60) {
         return best;
       }
       return null;

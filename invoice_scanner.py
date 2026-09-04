@@ -149,25 +149,41 @@ def parse_invoice(text, subject="", body=""):
             except:
                 continue
 
-    # 4. 日期
-    date_patterns = [
-        r'(\d{4}[年/-]\d{1,2}[月/-]\d{1,2})',
+    # 4. 日期 - 优先找开票日期，过滤不合理的旧日期
+    current_year = datetime.now().year
+    min_year = current_year - 2  # 只接受近两年内的发票
+    
+    date_candidates = []
+    
+    # 优先匹配"开票日期""开票时间"附近的日期
+    priority_patterns = [
+        r'(?:开票日期|开票时间|发票日期)[：:\s]*(\d{4}[年/-]\d{1,2}[月/-]\d{1,2}[日]?)',
+        r'(?:开票日期|开票时间)[^\n]{0,20}?(\d{4}[年/-]\d{1,2}[月/-]\d{1,2})',
+    ]
+    for pattern in priority_patterns:
+        for m in re.finditer(pattern, full_text):
+            date_candidates.append((m.group(1), 100))  # 高优先级
+    
+    # 普通日期匹配
+    normal_patterns = [
         r'(\d{4}[年/-]\d{1,2}[月/-]\d{1,2}[日]?)',
     ]
-    for pattern in date_patterns:
-        date_match = re.search(pattern, full_text)
-        if date_match:
-            date_str = date_match.group(1)
-            date_str = date_str.replace('年', '-').replace('月', '-').replace('日', '').replace('/', '-')
-            # 标准化为 YYYY-MM-DD
-            try:
-                parts = date_str.split('-')
-                if len(parts) == 3:
-                    y, m, d = parts
-                    result['date'] = f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
+    for pattern in normal_patterns:
+        for m in re.finditer(pattern, full_text):
+            date_candidates.append((m.group(1), 50))  # 普通优先级
+    
+    for date_str, priority in sorted(date_candidates, key=lambda x: -x[1]):
+        date_str = date_str.replace('年', '-').replace('月', '-').replace('日', '').replace('/', '-')
+        try:
+            parts = date_str.split('-')
+            if len(parts) == 3:
+                y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
+                # 过滤不合理的年份
+                if min_year <= y <= current_year + 1:
+                    result['date'] = f"{y:04d}-{m:02d}-{d:02d}"
                     break
-            except:
-                continue
+        except:
+            continue
 
     # 5. 销售方名称
     seller_patterns = [
