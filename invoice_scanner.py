@@ -132,18 +132,22 @@ def parse_invoice(text, subject="", body=""):
         result['invoiceNumber'] = number_match.group(1)
 
     # 3. 金额 - 多种模式匹配，优先对价税合计
-    # 注意：PDF 提取的文本可能跨行，所以用 [\s\S]*? 跨行匹配
+    # 注意：PDF 提取的文本可能跨行，价税合计和大写金额之间可能有很长的中文数字
     amount_patterns = [
-        # 价税合计（最优先）- 支持跨行和各种格式
-        r'价税合计[\s\S]{0,100}?[¥￥]\s*([\d,]+\.?\d{0,2})',
-        r'价税合计[\s\S]{0,100}?小写[\s\S]{0,50}?[¥￥]?\s*([\d,]+\.?\d{0,2})',
-        r'合计金额[\s\S]{0,100}?[¥￥]\s*([\d,]+\.?\d{0,2})',
-        r'[（(]小写[)）][\s\S]{0,50}?[¥￥]\s*([\d,]+\.?\d{0,2})',
-        # 单行价税合计
-        r'(?:价税合计|合计金额|总计|总金额)[（(]大写[)）][^\n]*?([¥￥]\s*[\d,]+\.?\d{0,2})',
-        r'(?:价税合计|合计金额|总计)[：:\s]*[¥￥]?\s*([\d,]+\.?\d{0,2})',
-        # 最后兜底：取最后一个带 ¥ 的金额
-        r'[¥￥]\s*([\d,]+\.\d{2})(?=\D*$|\D*\n)',
+        # 价税合计 + 小写）+ ¥ + 金额（最标准格式，范围扩大到500）
+        r'价税合计[\s\S]{0,500}?小写[)）][\s\S]{0,30}?[¥￥]\s*([\d,]+\.?\d{0,2})',
+        # 价税合计 + ¥ + 金额（直接带¥，范围扩大到500）
+        r'价税合计[\s\S]{0,500}?[¥￥]\s*([\d,]+\.?\d{0,2})',
+        # 价税合计 + 小写）+ 金额（无¥符号）
+        r'价税合计[\s\S]{0,500}?小写[)）][\s\S]{0,30}?([0-9][\d,]*\.?\d{0,2})',
+        # 小写）+ ¥ + 金额（独立匹配小写金额）
+        r'小写[)）][\s\S]{0,30}?[¥￥]\s*([\d,]+\.?\d{0,2})',
+        # 价税合计 + 大写）+ ... + ¥ + 金额（全电发票格式）
+        r'价税合计[\s\S]{0,500}?大写[)）][\s\S]{0,500}?[¥￥]\s*([\d,]+\.?\d{0,2})',
+        # 合计 + ¥ + 金额
+        r'合计[\s\S]{0,100}?[¥￥]\s*([\d,]+\.?\d{0,2})',
+        # 价税合计 + 直接金额（同一行或紧邻）
+        r'价税合计[：:\s\n]*([0-9][\d,]*\.?\d{0,2})',
     ]
     for pattern in amount_patterns:
         amt_match = re.search(pattern, full_text)
@@ -151,6 +155,18 @@ def parse_invoice(text, subject="", body=""):
             amt_str = amt_match.group(1).replace(',', '').replace('¥', '').replace('￥', '').strip()
             try:
                 amount = float(amt_str)
+                if amount > 0:
+                    result['amount'] = amount
+                    break
+            except:
+                continue
+
+    # 兜底：找所有 ¥ 金额，取最后一个（价税合计通常在发票末尾）
+    if 'amount' not in result:
+        all_amounts = re.findall(r'[¥￥]\s*([\d,]+\.?\d{0,2})', full_text)
+        for amt_str in reversed(all_amounts):
+            try:
+                amount = float(amt_str.replace(',', '').replace('¥', '').replace('￥', '').strip())
                 if amount > 0:
                     result['amount'] = amount
                     break
